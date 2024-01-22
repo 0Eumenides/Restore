@@ -1,0 +1,283 @@
+from utils import smpl3d as datasets
+from model.PhysMoP import PhysMoP
+from model.HumanModel import SMPL, SMPLH
+from utils.opt import Options
+from utils import util
+from utils import log
+from torch.utils.data import DataLoader
+import torch
+import torch.nn as nn
+import numpy as np
+import time
+import torch.optim as optim
+import os
+from utils.util import forward_kinematics
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
+
+def align_by_pelvis(joints, root):
+    """
+    Root alignments, i.e. subtracts the root.
+    Args:
+        joints: is N x 3
+        roots: index of root joints
+    """
+    hip_id = 0
+    pelvis = joints[hip_id, :]
+
+    return joints - np.expand_dims(pelvis, axis=0)
+
+
+def compute_errors(gt3ds, preds, root):
+    """
+    Gets MPJPE after pelvis alignment + MPJPE after Procrustes.
+    Evaluates on the 17 common joints.
+    Inputs:
+      - gt3ds: N x J x 3
+      - preds: N x J x 3
+      - root: root index for alignment
+    """
+    perjerrors, errors, perjerrors_pa, errors_pa = [], [], [], []
+    for i, (gt3d, pred) in enumerate(zip(gt3ds, preds)):
+        gt3d = gt3d.reshape(-1, 3)
+        # Root align.
+        gt3d = align_by_pelvis(gt3d, root)
+        pred3d = align_by_pelvis(pred, root)
+
+        joint_error = np.sqrt(np.sum((gt3d - pred3d) ** 2, axis=1))
+        errors.append(np.mean(joint_error) * 1000)
+        perjerrors.append(joint_error * 1000)
+
+    return perjerrors, errors
+
+def keypoint_3d_loss(criterion, pred_keypoints_3d, gt_keypoints_3d):
+    """Compute 3D keypoint loss for the examples that 3D keypoint annotations are available.
+    The loss is weighted by the confidence.
+    """
+    gt_keypoints_3d = gt_keypoints_3d - gt_keypoints_3d[:, 0:1, :]
+    pred_keypoints_3d = pred_keypoints_3d - pred_keypoints_3d[:, 0:1, :]
+
+    return criterion(pred_keypoints_3d * 100, gt_keypoints_3d * 100).mean()
+
+
+
+
+def main(opt):
+    lr_now = opt.lr_now
+    start_epoch = 1
+    # opt.is_eval = True
+    print('>>> create models')
+    in_features = opt.in_features  # 66
+    d_model = opt.d_model
+
+    net_pred = PhysMoP(hist_length=10,
+                       physics=False,
+                       data=True,
+                       fusion=False
+                       )
+
+    smplModel = SMPL(device='cuda')
+    # smplModel = SMPLH(device='cuda')
+
+    net_pred.cuda()
+
+    if opt.checkpoint_path is not None:
+        print('>>> loading pretrained model')
+        checkpoint = torch.load(opt.checkpoint_path)
+        net_pred.load_state_dict(checkpoint['state_dict'])
+
+    optimizer = optim.Adam(filter(lambda x: x.requires_grad, net_pred.parameters()), lr=opt.lr_now)
+    print(">>> total params: {:.2f}M".format(sum(p.numel() for p in net_pred.parameters()) / 1000000.0))
+
+    if opt.is_load or opt.is_eval:
+        model_path_len = './{}/ckpt_best.pth.tar'.format(opt.ckpt)
+        print(">>> loading ckpt len from '{}'".format(model_path_len))
+        ckpt = torch.load(model_path_len)
+        start_epoch = ckpt['epoch'] + 1
+        err_best = ckpt['err']
+        lr_now = ckpt['lr']
+        net_pred.load_state_dict(ckpt['state_dict'])
+        # net.load_state_dict(ckpt)
+        # optimizer.load_state_dict(ckpt['optimizer'])
+        # lr_now = util.lr_decay_mine(optimizer, lr_now, 0.2)
+        print(">>> ckpt len loaded (epoch: {} | err: {})".format(ckpt['epoch'], ckpt['err']))
+
+    print('>>> loading datasets')
+
+    if not opt.is_eval:
+        # dataset = datasets.Datasets(opt, split=0)
+        # actions = ["walking", "eating", "smoking", "discussion", "directions",
+        #            "greeting", "phoning", "posing", "purchases", "sitting",
+        #            "sittingdown", "takingphoto", "waiting", "walkingdog",
+        #            "walkingtogether"]
+        dataset = datasets.Datasets(opt, split=0)
+        print('>>> Training dataset length: {:d}'.format(dataset.__len__()))
+        data_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=True, num_workers=0, pin_memory=True)
+        valid_dataset = datasets.Datasets(opt, split=1)
+        print('>>> Validation dataset length: {:d}'.format(valid_dataset.__len__()))
+        valid_loader = DataLoader(valid_dataset, batch_size=opt.test_batch_size, shuffle=True, num_workers=0,
+                                  pin_memory=True)
+
+    test_dataset = datasets.Datasets(opt, split=2)
+    print('>>> Testing dataset length: {:d}'.format(test_dataset.__len__()))
+    test_loader = DataLoader(test_dataset, batch_size=opt.test_batch_size, shuffle=False, num_workers=0,
+                             pin_memory=True)
+
+    if not opt.is_eval:
+        err_best = 1000
+        for epo in range(start_epoch, opt.epoch + 1):
+            is_best = False
+            # if epo % opt.lr_decay == 0:
+            lr_now = util.lr_decay_mine(optimizer, lr_now, 0.1 ** (1 / opt.epoch))
+            print('>>> training epoch: {:d}'.format(epo))
+            ret_train = run_model(net_pred, smplModel, optimizer, is_train=0, data_loader=data_loader, epo=epo, opt=opt)
+            print('train error: {:.3f}'.format(ret_train['m_p3d_h36']))
+            ret_valid = run_model(net_pred, smplModel, is_train=1, data_loader=valid_loader, opt=opt, epo=epo)
+            print('validation error: {:.3f}'.format(ret_valid['m_p3d_h36']))
+            ret_test = run_model(net_pred, smplModel, is_train=3, data_loader=test_loader, opt=opt, epo=epo)
+            print('testing error: {:.3f}'.format(ret_test['#1']))
+            ret_log = np.array([epo, lr_now])
+            head = np.array(['epoch', 'lr'])
+            for k in ret_train.keys():
+                ret_log = np.append(ret_log, [ret_train[k]])
+                head = np.append(head, [k])
+            for k in ret_valid.keys():
+                ret_log = np.append(ret_log, [ret_valid[k]])
+                head = np.append(head, ['valid_' + k])
+            for k in ret_test.keys():
+                ret_log = np.append(ret_log, [ret_test[k]])
+                head = np.append(head, ['test_' + k])
+            log.save_csv_log(opt, head, ret_log, is_create=(epo == 1))
+            if ret_valid['m_p3d_h36'] < err_best:
+                err_best = ret_valid['m_p3d_h36']
+                is_best = True
+            log.save_ckpt({'epoch': epo,
+                           'lr': lr_now,
+                           'err': ret_valid['m_p3d_h36'],
+                           'state_dict': net_pred.state_dict(),
+                           'optimizer': optimizer.state_dict()},
+                          is_best=is_best, opt=opt)
+
+
+def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None, epo=1, opt=None):
+    if is_train == 0:
+        net_pred.train()
+    else:
+        net_pred.eval()
+
+    criterion_mae = nn.L1Loss().cuda()
+    l_p3d = 0
+    l_retore = 0
+    if is_train <= 1:
+        m_p3d_h36 = 0
+    else:
+        titles = np.array(range(opt.output_n)) + 1
+        m_p3d_h36 = np.zeros([opt.output_n])
+    n = 0
+    in_n = opt.input_n
+    out_n = opt.output_n
+
+    seq_in = opt.input_n
+    # joints at same loc
+    G2Hpose_idx = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+                   # 0-8
+                   33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53,  # 11-17
+                   54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65,  # 18-21
+                   ]
+
+    st = time.time()
+    for i, (pose, shape, trans) in enumerate(data_loader):
+        # for i, (angle) in enumerate(data_loader):
+        # print(i)
+        batch_size, seq_n, D = pose.shape
+        process_size = batch_size * seq_n
+
+        if batch_size == 1 and is_train == 0:
+            continue
+        n += batch_size
+        bt = time.time()
+
+        trans[:, :] = trans[:, :] - trans[:, 0:1]
+
+        gt_pose = torch.zeros([batch_size, seq_n, 63])
+        gt_pose[:, :, :3] = trans[:, :]
+        gt_pose[:, :, 3:] = pose[:, :, G2Hpose_idx]
+
+        gt_q = pose.view(process_size, 72).float().cuda()
+        gt_shape = shape.view(process_size, 10).float().cuda()
+        _, gt_joints, gt_joints_smpl = forward_kinematics(smplModel, gt_q, gt_shape, process_size,
+                                                          joints_smpl=True, vertices=True)
+
+        gt_pose = gt_pose.float().cuda()
+        motion_pred_data, motion_pred_physics_gt, motion_pred_physics_pred, motion_pred_fusion, weight_t = net_pred(
+            gt_pose)
+
+        pred_pose_data = torch.zeros([batch_size, seq_n, 72]).type(
+            torch.float32).cuda()
+
+        pred_pose_data[:, :, G2Hpose_idx] = motion_pred_data[:, :, 3:]
+        pred_pose_data = pred_pose_data.reshape([process_size, 72])
+        _, pred_joints_data, pred_joints_smpl_data = forward_kinematics(smplModel, pred_pose_data, gt_shape,
+                                                                        process_size, joints_smpl=True)
+
+        gt_J = torch.cat([gt_joints, gt_joints[:, 8:9], gt_joints[:, 8:9],
+                          gt_joints[:, 13:14], gt_joints[:, 16:17],
+                          gt_joints_smpl[:, 22:23], gt_joints_smpl[:, 22:23], gt_joints_smpl[:, 22:23],
+                          gt_joints_smpl[:, 23:], gt_joints_smpl[:, 23:], gt_joints_smpl[:, 23:],
+                          ], dim=1)
+        gt_J[:, [0, 1, 4]] = 0
+        pred_J_data = torch.cat([pred_joints_data, pred_joints_data[:, 8:9], pred_joints_data[:, 8:9],
+                                 pred_joints_data[:, 13:14], pred_joints_data[:, 16:17],
+                                 pred_joints_smpl_data[:, 22:23], pred_joints_smpl_data[:, 22:23],
+                                 pred_joints_smpl_data[:, 22:23],
+                                 pred_joints_smpl_data[:, 23:], pred_joints_smpl_data[:, 23:],
+                                 pred_joints_smpl_data[:, 23:],
+                                 ], dim=1)
+        pred_J_data[:, [0, 1, 4]] = 0
+
+        # gt_J = gt_J.view(batch_size,seq_n,-1,3)
+        # pred_J_data = pred_J_data.view(batch_size,seq_n,-1,3)
+
+        # 2d joint loss:
+        grad_norm = 0
+        if is_train == 0:
+            loss_keypoints_data = keypoint_3d_loss(criterion_mae, pred_J_data, gt_J)
+            loss_pose_data = criterion_mae(pred_pose_data, gt_q).mean()
+            # l_p3d += loss_p3d.cpu().data.numpy() * batch_size
+            loss_all = 5000 *(loss_keypoints_data+ loss_pose_data)
+            optimizer.zero_grad()
+            loss_all.backward()
+            nn.utils.clip_grad_norm_(list(net_pred.parameters()), max_norm=opt.max_norm)
+            optimizer.step()
+            # update log values
+
+        if is_train <= 1:  # if is validation or train simply output the overall mean error
+            mpjpe_p3d_h36 = keypoint_3d_loss(criterion_mae, pred_J_data[:,in_n:in_n + out_n], gt_J[:, in_n:in_n + out_n])
+            m_p3d_h36 += mpjpe_p3d_h36.cpu().data.numpy() * batch_size
+        else:
+            gt_J = gt_J.detach().cpu().numpy()
+            pred_J_data = pred_J_data.detach().cpu().numpy()
+            _, mpjpe_p3d_h36 = compute_errors(gt_J, pred_J_data, 0)
+            error_test_data = np.array(mpjpe_p3d_h36).reshape([-1, 20])
+            error_test_data = np.mean(error_test_data[:, 10:], 0)
+            m_p3d_h36 += error_test_data
+        if i % 1000 == 0:
+            print('{}/{}|bt {:.3f}s|tt{:.0f}s|gn{}'.format(i + 1, len(data_loader), time.time() - bt,
+                                                           time.time() - st, grad_norm))
+    ret = {}
+    if is_train == 0:
+        ret["l_p3d"] = l_p3d / n
+        ret["l_retore"] = l_retore / n
+    if is_train <= 1:
+        ret["m_p3d_h36"] = m_p3d_h36 / n
+    else:
+        m_p3d_h36 = m_p3d_h36 / n
+        for j in range(out_n):
+            ret["#{:d}".format(titles[j])] = m_p3d_h36[j]
+    return ret
+
+
+if __name__ == '__main__':
+    option = Options().parse()
+    main(option)
