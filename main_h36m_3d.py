@@ -15,7 +15,7 @@ from utils.util import forward_kinematics, remove_singlular_batch
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 
 def align_by_pelvis(joints, root):
@@ -65,10 +65,21 @@ def visual(joints, ID):
 
     # 绘制点
     ax.scatter(x, y, z)
+    # for i in range(len(joints)):
+    #     ax.text(x[i], y[i], z[i], f'{i}', color='blue', fontsize=10)
 
-    # 绘制连接线（如果需要）
-    # for i in range(len(joints) - 1):
-    #     ax.plot([x[i], x[i+1]], [y[i], y[i+1]], [z[i], z[i+1]])
+    # connections = [
+    #     (0, 1), (1, 4), (4, 7), (7, 10),  # 右侧腿部
+    #     (0, 2), (2, 5), (5, 8), (8, 11),  # 左侧腿部
+    #     (0, 3), (3, 6), (6, 9),  # 脊柱
+    #     (9, 12), (12, 15),  # 颈部和头部
+    #     (9, 13), (13, 16), (16, 18), (18, 20), (20, 22),  # 右侧手臂
+    #     (9, 14), (14, 17), (17, 19), (19, 21), (21, 23)  # 左侧手臂
+    # ]
+    #
+    # # 绘制连接线
+    # for (i, j) in connections:
+    #     ax.plot([x[i], x[j]], [y[i], y[j]], [z[i], z[j]], 'blue')
 
     ax.set_xlabel('X Axis')
     ax.set_ylabel('Y Axis')
@@ -193,12 +204,12 @@ def main(opt):
                 ret_log = np.append(ret_log, [ret_test[k]])
                 head = np.append(head, ['test_' + k])
             log.save_csv_log(opt, head, ret_log, is_create=(epo == 1))
-            if ret_test['m_p3d_h36'] < err_best:
-                err_best = ret_test['m_p3d_h36']
+            if ret_test['#10'] < err_best:
+                err_best = ret_test['#10']
                 is_best = True
             log.save_ckpt({'epoch': epo,
                            'lr': lr_now,
-                           'err': ret_test['m_p3d_h36'],
+                           'err': ret_test['#10'],
                            'state_dict': net_pred.state_dict(),
                            'optimizer': optimizer.state_dict()},
                           is_best=is_best, opt=opt)
@@ -223,11 +234,6 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
     out_n = opt.output_n
 
     # joints at same loc
-    G2Hpose_idx = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-                   # 0-8
-                   33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53,  # 11-17
-                   54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65,  # 18-21
-                   ]
 
     st = time.time()
     for i, (pose, shape, trans) in enumerate(data_loader):
@@ -242,14 +248,7 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
         n += batch_size
         bt = time.time()
 
-        gt_q = torch.from_numpy(posePreprocess(pose, trans)).float().cuda()
-        gt_q[:, :, :3] = gt_q[:, :, :3] - gt_q[:, 0:1, :3]
-        gt_q = remove_singlular_batch(gt_q)
-
-        gt_pose = torch.zeros([batch_size, seq_n, 72]).cuda()
-        gt_pose[:, :, G2Hpose_idx] = gt_q[:, :, 3:]
-
-        gt_pose = gt_pose.view(process_size, 72)
+        gt_pose = pose.view(process_size, 72).float().cuda()
         gt_shape = shape.view(process_size, 10).float().cuda()
 
         # pose = pose.view(process_size, 72).float().cuda()
@@ -257,13 +256,10 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
         #                                          joints_smpl=True)
         gt_joints, gt_joints_smpl = forward_kinematics(smplModel, gt_pose, gt_shape,
                                                        joints_smpl=True)
-
         motion_pred_data, motion_pred_physics_gt, motion_pred_physics_pred, motion_pred_fusion, weight_t = net_pred(
-            gt_q)
+            gt_pose)
 
-        pred_pose_data = torch.zeros([batch_size, seq_n, 72]).float().cuda()
-        pred_pose_data[:, :, G2Hpose_idx] = motion_pred_data[:, :, 3:]
-        pred_pose_data = pred_pose_data.reshape([process_size, 72])
+        pred_pose_data = motion_pred_data.view(process_size, 72)
         pred_joints_data, pred_joints_smpl_data = forward_kinematics(smplModel, pred_pose_data, gt_shape,
                                                                      joints_smpl=True)
 
@@ -305,7 +301,6 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
         else:
             gt_J = gt_joints.detach().cpu().numpy()
             pred_J_data = pred_joints_data.detach().cpu().numpy()
-            # _, mpjpe_p3d_h36 = compute_errors(gt_J, pred_J_data, 0)
             _, mpjpe_p3d_h36 = compute_errors(gt_J, pred_J_data, 0)
             error_test_data = np.array(mpjpe_p3d_h36).reshape([-1, seq_n])
             error_test_data = error_test_data[:, 10:]

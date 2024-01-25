@@ -42,10 +42,11 @@ class Datasets(Dataset):
         key = 0
         for subj in subs:
             with open('/home/eniac/data/CodeTest/dth/Restore/SMPL/Human36M_subject' + str(subj) + '_SMPL_NeuralAnnot.json',
+            # with open('/code/Restore//SMPL/Human36M_subject' + str(subj) + '_SMPL_NeuralAnnot.json',
                       'r') as f:
                 smpl_params = json.load(f)
             for action_idx in np.arange(2,len(acts)+2):
-                # subj5需要单独处理
+                # subj5需要单独处理£
                 for subact in [1, 2]:  # subactions
                     print("Reading subject {0}, action {1}, subaction {2}".format(subj, action_idx, subact))
                     the_sequence = smpl_params[str(action_idx)][str(subact)]

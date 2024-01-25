@@ -30,8 +30,8 @@ class Options:
                                  help='whether it is to evaluate the model')
         self.parser.add_argument('--ckpt', type=str, default='checkpoint/', help='path to save checkpoint')
         self.parser.add_argument('--checkpoint_path', type=str, default=None, help='path to checkpoint')
-        self.parser.add_argument('--skip_rate', type=int, default=5, help='skip rate of samples')
-        self.parser.add_argument('--skip_rate_test', type=int, default=5, help='skip rate of samples for test')
+        self.parser.add_argument('--skip_rate', type=int, default=1, help='skip rate of samples')
+        self.parser.add_argument('--skip_rate_test', type=int, default=1, help='skip rate of samples for test')
 
         # ===============================================================
         #                     Model options
@@ -48,8 +48,8 @@ class Options:
         # ===============================================================
         #                     Running options
         # ===============================================================
-        self.parser.add_argument('--input_n', type=int, default=50, help='past frame number')
-        self.parser.add_argument('--output_n', type=int, default=25, help='future frame number')
+        self.parser.add_argument('--input_n', type=int, default=10, help='past frame number')
+        self.parser.add_argument('--output_n', type=int, default=10, help='future frame number')
         self.parser.add_argument('--dct_n', type=int, default=10, help='future frame number')
         self.parser.add_argument('--lr_now', type=float, default=0.0003)
         self.parser.add_argument('--max_norm', type=float, default=10000)
@@ -60,25 +60,8 @@ class Options:
                                  help='whether to load existing model')
         self.parser.add_argument('--name', default='train',
                                  help='whether to load existing model')
-        # ===============================================================
-        #                     TimesNet options
-        # ===============================================================
-        self.parser.add_argument('--top_k', type=int, default=3, help='top k frequency')
-        self.parser.add_argument('--e_layers', type=int, default=2, help='TimesBlock layers')
-        self.parser.add_argument('--enc_in', type=int, default=3, help='input channel')
-        self.parser.add_argument('--d_ff', type=int, default=32, help='hidden layer size')
-        self.parser.add_argument('--num_kernels', type=int, default=6, help='number of kernels')
-        self.parser.add_argument('--embed', type=str, default='timeF', help='embedding type')
-        self.parser.add_argument('--freq', type=str, default='h', help='frequency')
-        self.parser.add_argument('--dropout', type=float, default=0.1, help='dropout probability')
-        self.parser.add_argument('--c_out', type=int, default=3, help='output channel')
-        self.parser.add_argument('--seq_len', type=int, default=50, help='input sequence length')
-        self.parser.add_argument('--pred_len', type=int, default=10, help='prediction sequence length')
-        # ===============================================================
-        #                    TSFormer options
-        # ===============================================================
-        self.parser.add_argument('--embed_dim', type=int, default=96, help='number of workers')
-        self.parser.add_argument('--tsformer', type=str, default=None, help='path to checkpoint')
+
+
 
     def _print(self):
         print("\n==================Options=================")
