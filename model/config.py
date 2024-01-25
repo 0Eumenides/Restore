@@ -1,4 +1,3 @@
-from os.path import join
 from easydict import EasyDict as edict
 
 hist_length = 10

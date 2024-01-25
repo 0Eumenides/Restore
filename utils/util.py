@@ -240,22 +240,24 @@ def batch_roteulerSMPL(angle):
     return rotMat, rotMat_individual
 
 
-def forward_kinematics(smplModel, pose, shape, process_size,vertices=False, joints_smpl=False):
+def forward_kinematics(smplModel, pose, shape, joints_smpl=False):
     rotmat, rotMat_individual = batch_roteulerSMPL(pose)
 
     output_smpl = smplModel.forward(betas=shape, rotmat=rotmat)
 
-    if vertices:
-        vertices = output_smpl.vertices.float().cuda()
+    joints = output_smpl.joints[:, :37].float().cuda()
+
+    if joints_smpl:
+        jointsSmpl = output_smpl.joints_smpl[:, :24].float().cuda()
     else:
-        vertices = None
+        jointsSmpl = None
 
-    joints = output_smpl.joints[:, :17].float().cuda()
-
-    if joints_smpl == True:
-        joints_smpl = output_smpl.joints_smpl[:, :24].float().cuda()
-    else:
-        joints_smpl = None
+    return joints, jointsSmpl
 
 
-    return vertices, joints, joints_smpl
+def remove_singlular_batch(pred_q):
+    pred_q_updated = pred_q.clone()
+    pred_q_updated[:, :, 3:] = torch.remainder(pred_q_updated[:, :, 3:], 2 * np.pi)
+    pred_q_updated[:, :, 3:][pred_q_updated[:, :, 3:] > np.pi] = pred_q_updated[:, :, 3:][
+                                                                     pred_q_updated[:, :, 3:] > np.pi] - 2 * np.pi
+    return pred_q_updated

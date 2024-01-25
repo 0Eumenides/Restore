@@ -1,33 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="Restore" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
-    <option name="confirmBeforeUploading" value="false" />
+  <component name="PublishConfigData" autoUpload="Always" serverName="Restore2" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
-      <paths name="DANet">
+      <paths name="Restore2">
         <serverdata>
           <mappings>
-            <mapping deploy="/code/dth/DANet" local="$PROJECT_DIR$" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="PyG_1">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/code/dth/DANet" local="$PROJECT_DIR$" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="PyG_2">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/data/CodeTest/dth/DANet" local="$PROJECT_DIR$" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="Restore">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/code/dth/Restore" local="$PROJECT_DIR$" />
+            <mapping deploy="/data/CodeTest/dth/Restore" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>

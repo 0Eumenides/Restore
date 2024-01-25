@@ -1,16 +1,15 @@
 import os
 import copy
-from easydict import EasyDict as edict
 
 import torch
 import torch.nn as nn
 import numpy as np
 
 from model.siMLPe_mlp import build_mlps
+# from siMLPe_mlp import build_mlps
 from einops.layers.torch import Rearrange
 
 import model.config as config
-
 
 class Fusion(nn.Module):
     def __init__(self):

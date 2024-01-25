@@ -41,7 +41,7 @@ class Datasets(Dataset):
         subs = subs[split]
         key = 0
         for subj in subs:
-            with open('/data/dth/h3.6m/SMPL/Human36M_subject' + str(subj) + '_SMPL_NeuralAnnot.json',
+            with open('/home/eniac/data/CodeTest/dth/Restore/SMPL/Human36M_subject' + str(subj) + '_SMPL_NeuralAnnot.json',
                       'r') as f:
                 smpl_params = json.load(f)
             for action_idx in np.arange(2,len(acts)+2):

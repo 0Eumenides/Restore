@@ -51,7 +51,7 @@ class Options:
         self.parser.add_argument('--input_n', type=int, default=50, help='past frame number')
         self.parser.add_argument('--output_n', type=int, default=25, help='future frame number')
         self.parser.add_argument('--dct_n', type=int, default=10, help='future frame number')
-        self.parser.add_argument('--lr_now', type=float, default=0.0005)
+        self.parser.add_argument('--lr_now', type=float, default=0.0003)
         self.parser.add_argument('--max_norm', type=float, default=10000)
         self.parser.add_argument('--epoch', type=int, default=100)
         self.parser.add_argument('--batch_size', type=int, default=32)
