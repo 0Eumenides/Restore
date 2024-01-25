@@ -82,8 +82,8 @@ class SMPL(object):
         # -- Load SMPL params --
 
         # params = smplx.create(model_path, 'smpl')
-        model_path = '/home/eniac/data/CodeTest/dth/Restore/model/processed_basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
-        # model_path = '/code/Restore/model/processed_basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
+        # model_path = '/home/eniac/data/CodeTest/dth/Restore/model/processed_basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
+        model_path = '/code/Restore/model/processed_basicModel_neutral_lbs_10_207_0_v1.0.0.pkl'
 
         with open(model_path, 'rb') as f:
             params = pickle.load(f)
