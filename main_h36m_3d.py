@@ -13,7 +13,6 @@ import torch.optim as optim
 import os
 from utils.util import forward_kinematics, remove_singlular_batch
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
@@ -263,19 +262,23 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
         pred_joints_data, pred_joints_smpl_data = forward_kinematics(smplModel, pred_pose_data, gt_shape,
                                                                      joints_smpl=True)
 
-        gt_J = gt_joints_smpl
-        pred_J_data = pred_joints_smpl_data
+        joints_to_remove = [1, 2, 3, 13, 14]
+        mask = torch.ones(24, dtype=torch.bool)
+        mask[joints_to_remove] = False
+        gt_joints_smpl = gt_joints_smpl[:, mask, :]
+        pred_joints_smpl_data = pred_joints_smpl_data[:, mask, :]
 
         # 2d joint loss:
-        grad_norm = 0
+        # grad_norm = 0
         if is_train == 0:
             loss_keypoints_data = keypoint_3d_loss(criterion_mae, pred_joints_smpl_data, gt_joints_smpl)
             loss_pose_data = criterion_mae(pred_pose_data, gt_pose).mean()
             # l_p3d += loss_p3d.cpu().data.numpy() * batch_size
             loss_all = 5000 * (loss_keypoints_data + loss_pose_data)
+            # loss_all = 5000 * loss_keypoints_data
             optimizer.zero_grad()
             loss_all.backward()
-            nn.utils.clip_grad_norm_(list(net_pred.parameters()), max_norm=opt.max_norm)
+            # nn.utils.clip_grad_norm_(list(net_pred.parameters()), max_norm=opt.max_norm)
             optimizer.step()
             # update log values
 
@@ -284,15 +287,15 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
                                              gt_joints_smpl[:, in_n:in_n + out_n]) * 5000
             m_p3d_h36 += mpjpe_p3d_h36.cpu().data.numpy() * batch_size
         else:
-            gt_J = gt_joints.detach().cpu().numpy()
-            pred_J_data = pred_joints_data.detach().cpu().numpy()
+            gt_J = gt_joints_smpl.detach().cpu().numpy()
+            pred_J_data = pred_joints_smpl_data.detach().cpu().numpy()
             _, mpjpe_p3d_h36 = compute_errors(gt_J, pred_J_data, 0)
             error_test_data = np.array(mpjpe_p3d_h36).reshape([-1, seq_n])
             error_test_data = error_test_data[:, 10:]
             m_p3d_h36 += error_test_data.sum(axis=0)
         if i % 1000 == 0:
-            print('{}/{}|bt {:.3f}s|tt{:.0f}s|gn{}'.format(i + 1, len(data_loader), time.time() - bt,
-                                                           time.time() - st, grad_norm))
+            print('{}/{}|bt {:.3f}s|tt{:.0f}s|'.format(i + 1, len(data_loader), time.time() - bt,
+                                                           time.time() - st))
     ret = {}
     if is_train == 0:
         ret["l_p3d"] = l_p3d / n
