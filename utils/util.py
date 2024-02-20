@@ -245,7 +245,7 @@ def forward_kinematics(smplModel, pose, shape, joints_smpl=False):
 
     output_smpl = smplModel.forward(betas=shape, rotmat=rotmat)
 
-    joints = output_smpl.joints[:, :37].float().cuda()
+    joints = output_smpl.joints[:, :17].float().cuda()
 
     if joints_smpl:
         jointsSmpl = output_smpl.joints_smpl[:, :24].float().cuda()

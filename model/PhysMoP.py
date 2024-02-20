@@ -72,10 +72,10 @@ class Regression(nn.Module):
         self.motion_feats_fc = nn.Linear(config.hist_length * config.dim, config.dim)
 
         z = config.dim * 4
-        Jactuation_layer_size = [z, 512, 256, 72]
-        C_layer_size = [z, 512, 256, 72]
+        Jactuation_layer_size = [z, 512, 256, 63]
+        C_layer_size = [z, 512, 256, 63]
         # M_layer_size = [z, 512, 512, 63*32]
-        M_layer_size = [z, 512, 512, 2628]
+        M_layer_size = [z, 512, 512, 63*32]
 
         self.jactuation_net_FC1 = nn.Linear(Jactuation_layer_size[0], Jactuation_layer_size[1])
         self.jactuation_net_relu1 = nn.ReLU()
@@ -242,9 +242,9 @@ class PhysMoP(nn.Module):
 
     def forward(self, gt_q, mode='train'):
         # gt_mesh: NxTx6890x3
-        # gt_q: NxTx72
-        gt_q = gt_q.reshape([-1, config.total_length, 72])
+        # gt_q: NxTx63
+        gt_q = gt_q.reshape([-1, config.total_length, 63])
         motion_pred_data, motion_pred_physics_gt, motion_pred_physics_pred, motion_pred_fusion, pred_q_ddot_physics_gt, weight_t = self.regressor(
             gt_q[:, :self.hist_length], gt_q, mode, self.fusion)
 
-        return (motion_pred_data, motion_pred_physics_gt, motion_pred_physics_pred, motion_pred_fusion, weight_t)
+        return motion_pred_data

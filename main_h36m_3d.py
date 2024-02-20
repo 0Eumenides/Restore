@@ -14,7 +14,7 @@ import os
 from utils.util import forward_kinematics, remove_singlular_batch
 import matplotlib.pyplot as plt
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 
 def align_by_pelvis(joints, root):
@@ -232,6 +232,11 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
     in_n = opt.input_n
     out_n = opt.output_n
 
+    # 去除7，9，13，14关节
+    G2Hpose_idx = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 24, 25, 26,
+                   30, 31, 32, 33, 34, 35, 36, 37, 38, 45, 46, 47, 48, 49, 50, 51, 52, 53,
+                   54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71
+                   ]
     # joints at same loc
 
     st = time.time()
@@ -247,31 +252,40 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
         n += batch_size
         bt = time.time()
 
-        gt_pose = pose.view(process_size, 72).float().cuda()
         gt_shape = shape.view(process_size, 10).float().cuda()
+
+        gt_pose = torch.zeros([batch_size, seq_n, 72])
+        gt_pose[:, :, G2Hpose_idx] = pose[:, :, G2Hpose_idx].float()
+
+        in_pose = torch.cat((trans, gt_pose[:, :, G2Hpose_idx]), dim=2).cuda()
+
+        gt_pose = gt_pose.view(process_size, 72).float().cuda()
 
         # pose = pose.view(process_size, 72).float().cuda()
         # joints, joints_smpl = forward_kinematics(smplModel, pose, gt_shape,
         #                                          joints_smpl=True)
         gt_joints, gt_joints_smpl = forward_kinematics(smplModel, gt_pose, gt_shape,
                                                        joints_smpl=True)
-        motion_pred_data, motion_pred_physics_gt, motion_pred_physics_pred, motion_pred_fusion, weight_t = net_pred(
-            gt_pose)
+        motion_pred_data = net_pred(
+            in_pose.float())
 
-        pred_pose_data = motion_pred_data.view(process_size, 72)
+        pred_pose_data = torch.zeros([batch_size, seq_n, 72]).float().cuda()
+        pred_pose_data[:, :, G2Hpose_idx] = motion_pred_data[:, :, 3:]
+        pred_pose_data = pred_pose_data.view(process_size, 72)
+
         pred_joints_data, pred_joints_smpl_data = forward_kinematics(smplModel, pred_pose_data, gt_shape,
                                                                      joints_smpl=True)
 
-        joints_to_remove = [1, 2, 3, 13, 14]
-        mask = torch.ones(24, dtype=torch.bool)
-        mask[joints_to_remove] = False
-        gt_joints_smpl = gt_joints_smpl[:, mask, :]
-        pred_joints_smpl_data = pred_joints_smpl_data[:, mask, :]
+        # joints_to_remove = [1, 2, 3, 13, 14]
+        # mask = torch.ones(24, dtype=torch.bool)
+        # mask[joints_to_remove] = False
+        # gt_joints_smpl = gt_joints_smpl[:, mask, :]
+        # pred_joints_smpl_data = pred_joints_smpl_data[:, mask, :]
 
         # 2d joint loss:
         # grad_norm = 0
         if is_train == 0:
-            loss_keypoints_data = keypoint_3d_loss(criterion_mae, pred_joints_smpl_data, gt_joints_smpl)
+            loss_keypoints_data = keypoint_3d_loss(criterion_mae, pred_joints_data, gt_joints)
             loss_pose_data = criterion_mae(pred_pose_data, gt_pose).mean()
             # l_p3d += loss_p3d.cpu().data.numpy() * batch_size
             loss_all = 5000 * (loss_keypoints_data + loss_pose_data)
@@ -287,15 +301,15 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
                                              gt_joints_smpl[:, in_n:in_n + out_n]) * 5000
             m_p3d_h36 += mpjpe_p3d_h36.cpu().data.numpy() * batch_size
         else:
-            gt_J = gt_joints_smpl.detach().cpu().numpy()
-            pred_J_data = pred_joints_smpl_data.detach().cpu().numpy()
+            gt_J = gt_joints.detach().cpu().numpy()
+            pred_J_data = pred_joints_data.detach().cpu().numpy()
             _, mpjpe_p3d_h36 = compute_errors(gt_J, pred_J_data, 0)
             error_test_data = np.array(mpjpe_p3d_h36).reshape([-1, seq_n])
             error_test_data = error_test_data[:, 10:]
             m_p3d_h36 += error_test_data.sum(axis=0)
         if i % 1000 == 0:
             print('{}/{}|bt {:.3f}s|tt{:.0f}s|'.format(i + 1, len(data_loader), time.time() - bt,
-                                                           time.time() - st))
+                                                       time.time() - st))
     ret = {}
     if is_train == 0:
         ret["l_p3d"] = l_p3d / n

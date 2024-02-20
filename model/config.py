@@ -4,7 +4,7 @@ hist_length = 10
 pred_length = 10
 total_length = hist_length + pred_length
 
-dim = 72
+dim = 63
 motion_mlp = edict()
 motion_mlp.hidden_dim = dim
 motion_mlp.seq_len = hist_length
