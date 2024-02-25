@@ -1,6 +1,6 @@
 from utils import smpl3d as datasets
 from model.PhysMoP import PhysMoP
-from model.HumanModel import SMPL
+# from model.HumanModel import SMPL
 from utils.opt import Options
 from utils import util
 from utils import log
@@ -13,8 +13,9 @@ import torch.optim as optim
 import os
 from utils.util import forward_kinematics, remove_singlular_batch
 import matplotlib.pyplot as plt
+from model.body_models import SMPL
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 
 def align_by_pelvis(joints, root):
@@ -133,7 +134,8 @@ def main(opt):
                        fusion=False
                        )
 
-    smplModel = SMPL(device='cuda')
+    smplModel = SMPL(model_path='/code/dth/Restore/model/processed_basicModel_neutral_lbs_10_207_0_v1.0.0.pkl').cuda()
+    # smplModel = SMPL(model_path='/code/dth/Restore/model/model.npz').cuda()
 
     net_pred.cuda()
 
@@ -232,11 +234,6 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
     in_n = opt.input_n
     out_n = opt.output_n
 
-    # 去除7，9，13，14关节
-    G2Hpose_idx = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 24, 25, 26,
-                   30, 31, 32, 33, 34, 35, 36, 37, 38, 45, 46, 47, 48, 49, 50, 51, 52, 53,
-                   54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71
-                   ]
     # joints at same loc
 
     st = time.time()
@@ -253,40 +250,23 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
         bt = time.time()
 
         gt_shape = shape.view(process_size, 10).float().cuda()
+        gt_pose = pose.view(process_size, 72).float().cuda()
+        gt_trans = trans.view(process_size, 3).float().cuda()
 
-        gt_pose = torch.zeros([batch_size, seq_n, 72])
-        gt_pose[:, :, G2Hpose_idx] = pose[:, :, G2Hpose_idx].float()
+        smpl_output = smplModel.forward(gt_shape, gt_pose, gt_trans)
+        gt_joints = smpl_output.joints
 
-        in_pose = torch.cat((trans, gt_pose[:, :, G2Hpose_idx]), dim=2).cuda()
+        motion_pred_data = net_pred(gt_pose)
 
-        gt_pose = gt_pose.view(process_size, 72).float().cuda()
-
-        # pose = pose.view(process_size, 72).float().cuda()
-        # joints, joints_smpl = forward_kinematics(smplModel, pose, gt_shape,
-        #                                          joints_smpl=True)
-        gt_joints, gt_joints_smpl = forward_kinematics(smplModel, gt_pose, gt_shape,
-                                                       joints_smpl=True)
-        motion_pred_data = net_pred(
-            in_pose.float())
-
-        pred_pose_data = torch.zeros([batch_size, seq_n, 72]).float().cuda()
-        pred_pose_data[:, :, G2Hpose_idx] = motion_pred_data[:, :, 3:]
-        pred_pose_data = pred_pose_data.view(process_size, 72)
-
-        pred_joints_data, pred_joints_smpl_data = forward_kinematics(smplModel, pred_pose_data, gt_shape,
-                                                                     joints_smpl=True)
-
-        # joints_to_remove = [1, 2, 3, 13, 14]
-        # mask = torch.ones(24, dtype=torch.bool)
-        # mask[joints_to_remove] = False
-        # gt_joints_smpl = gt_joints_smpl[:, mask, :]
-        # pred_joints_smpl_data = pred_joints_smpl_data[:, mask, :]
+        motion_pred_data = motion_pred_data.view(process_size,-1)
+        smpl_output =  smplModel.forward(gt_shape, motion_pred_data, gt_trans)
+        pred_joints_data = smpl_output.joints
 
         # 2d joint loss:
         # grad_norm = 0
         if is_train == 0:
             loss_keypoints_data = keypoint_3d_loss(criterion_mae, pred_joints_data, gt_joints)
-            loss_pose_data = criterion_mae(pred_pose_data, gt_pose).mean()
+            loss_pose_data = criterion_mae(motion_pred_data, gt_pose).mean()
             # l_p3d += loss_p3d.cpu().data.numpy() * batch_size
             loss_all = 5000 * (loss_keypoints_data + loss_pose_data)
             # loss_all = 5000 * loss_keypoints_data
@@ -297,8 +277,10 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
             # update log values
 
         if is_train <= 1:  # if is validation or train simply output the overall mean error
-            mpjpe_p3d_h36 = keypoint_3d_loss(criterion_mae, pred_joints_smpl_data[:, in_n:in_n + out_n],
-                                             gt_joints_smpl[:, in_n:in_n + out_n]) * 5000
+            pred_joints_data = pred_joints_data.view(batch_size, seq_n, -1, 3)[:, in_n:in_n + out_n].contiguous().view(process_size//2, -1, 3)
+            gt_joints = gt_joints.view(batch_size, seq_n, -1, 3)[:,in_n:in_n + out_n].contiguous().view(process_size//2, -1, 3)
+            mpjpe_p3d_h36 = keypoint_3d_loss(criterion_mae, pred_joints_data,
+                                             gt_joints) * 5000
             m_p3d_h36 += mpjpe_p3d_h36.cpu().data.numpy() * batch_size
         else:
             gt_J = gt_joints.detach().cpu().numpy()

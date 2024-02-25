@@ -55,7 +55,7 @@ class Options:
         self.parser.add_argument('--max_norm', type=float, default=10000)
         self.parser.add_argument('--epoch', type=int, default=100)
         self.parser.add_argument('--batch_size', type=int, default=32)
-        self.parser.add_argument('--test_batch_size', type=int, default=16)
+        self.parser.add_argument('--test_batch_size', type=int, default=32)
         self.parser.add_argument('--is_load', dest='is_load', action='store_true',
                                  help='whether to load existing model')
         self.parser.add_argument('--name', default='train',
