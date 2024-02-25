@@ -234,7 +234,8 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
     in_n = opt.input_n
     out_n = opt.output_n
 
-    # joints at same loc
+    # 选择哪些关节被使用
+    jointToUse = [4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 16, 17, 18, 19, 20, 21, 22, 23]
 
     st = time.time()
     for i, (pose, shape, trans) in enumerate(data_loader):
@@ -254,13 +255,13 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
         gt_trans = trans.view(process_size, 3).float().cuda()
 
         smpl_output = smplModel.forward(gt_shape, gt_pose, gt_trans)
-        gt_joints = smpl_output.joints
+        gt_joints = smpl_output.joints[:, jointToUse, :]
 
         motion_pred_data = net_pred(gt_pose)
 
-        motion_pred_data = motion_pred_data.view(process_size,-1)
-        smpl_output =  smplModel.forward(gt_shape, motion_pred_data, gt_trans)
-        pred_joints_data = smpl_output.joints
+        motion_pred_data = motion_pred_data.view(process_size, -1)
+        smpl_output = smplModel.forward(gt_shape, motion_pred_data, gt_trans)
+        pred_joints_data = smpl_output.joints[:, jointToUse, :]
 
         # 2d joint loss:
         # grad_norm = 0
@@ -277,8 +278,10 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
             # update log values
 
         if is_train <= 1:  # if is validation or train simply output the overall mean error
-            pred_joints_data = pred_joints_data.view(batch_size, seq_n, -1, 3)[:, in_n:in_n + out_n].contiguous().view(process_size//2, -1, 3)
-            gt_joints = gt_joints.view(batch_size, seq_n, -1, 3)[:,in_n:in_n + out_n].contiguous().view(process_size//2, -1, 3)
+            pred_joints_data = pred_joints_data.view(batch_size, seq_n, -1, 3)[:, in_n:in_n + out_n].contiguous().view(
+                process_size // 2, -1, 3)
+            gt_joints = gt_joints.view(batch_size, seq_n, -1, 3)[:, in_n:in_n + out_n].contiguous().view(
+                process_size // 2, -1, 3)
             mpjpe_p3d_h36 = keypoint_3d_loss(criterion_mae, pred_joints_data,
                                              gt_joints) * 5000
             m_p3d_h36 += mpjpe_p3d_h36.cpu().data.numpy() * batch_size
