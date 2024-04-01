@@ -44,7 +44,7 @@ class DefaultValue(nn.Module):
         self.mlp = nn.Linear(d_model, 3)
         self.reset_parameters()
 
-    def forward(self, src, label):
+    def forward(self, label):
         """"""
         # center = self.compute_pose_center(src)
         return self.mlp(self.value[label]).unsqueeze(1).repeat(1, 10, 1, 1)

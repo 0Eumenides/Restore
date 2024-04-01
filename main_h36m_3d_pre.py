@@ -1,5 +1,5 @@
 from utils import h36motion3d as datasets
-from model import Restoration
+from model import AttModel, Restoration
 from utils.opt import Options
 from utils import util
 from utils import log
@@ -15,6 +15,27 @@ import os
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
+def getMask(bs, input_n, mask_ratio=0.2):
+    joint_indices = [2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 17, 18, 19, 21, 22, 25, 26, 27, 29, 30]
+    masked_joints_indices = [18, 19, 21, 22, 2, 3, 4, 5]
+    # 将全局关节编号转换为局部索引
+    masked_joint_local_indices = [joint_indices.index(joint) for joint in masked_joints_indices]
+
+    # 创建遮掩数组，初始全部设置为 1
+    mask = torch.ones((bs, input_n, len(joint_indices)))
+
+    # 计算每个关节需要遮掩的数量
+    num_to_mask_per_joint = int(input_n * mask_ratio)
+
+    # 遍历需要遮掩的关节索引
+    for joint in masked_joint_local_indices:
+        # 对每个批次中的每个关节进行遮掩
+        for i in range(bs):
+            # 随机选择需要遮掩的时间步
+            time_steps_to_mask = torch.randperm(input_n)[:num_to_mask_per_joint]
+            mask[i, time_steps_to_mask, joint] = 0
+
+    return mask.cuda()
 
 def main(opt):
     lr_now = opt.lr_now
@@ -23,9 +44,11 @@ def main(opt):
     print('>>> create models')
     in_features = opt.in_features  # 66
     d_model = opt.d_model
-    kernel_size = opt.kernel_size
-    net_pred = AttModel.AttModel(in_features=in_features, kernel_size=kernel_size, d_model=d_model,
+    net_pred = AttModel.AttModel(in_features=in_features, d_model=d_model,
                                  num_stage=opt.num_stage, dct_n=opt.dct_n)
+    net_restore = Restoration.Restoration(input_n=10, d_model=64, num_stage=12,eta=6)
+
+    net_restore.cuda()
     net_pred.cuda()
 
     optimizer = optim.Adam(filter(lambda x: x.requires_grad, net_pred.parameters()), lr=opt.lr_now)
@@ -83,11 +106,11 @@ def main(opt):
             # if epo % opt.lr_decay == 0:
             lr_now = util.lr_decay_mine(optimizer, lr_now, 0.1 ** (1 / opt.epoch))
             print('>>> training epoch: {:d}'.format(epo))
-            ret_train = run_model(net_pred, optimizer, is_train=0, data_loader=data_loader, epo=epo, opt=opt)
+            ret_train = run_model(net_pred,net_restore, optimizer, is_train=0, data_loader=data_loader, epo=epo, opt=opt)
             print('train error: {:.3f}'.format(ret_train['m_p3d_h36']))
-            ret_valid = run_model(net_pred, is_train=1, data_loader=valid_loader, opt=opt, epo=epo)
+            ret_valid = run_model(net_pred, net_restore,is_train=1, data_loader=valid_loader, opt=opt, epo=epo)
             print('validation error: {:.3f}'.format(ret_valid['m_p3d_h36']))
-            ret_test = run_model(net_pred, is_train=3, data_loader=test_loader, opt=opt, epo=epo)
+            ret_test = run_model(net_pred,net_restore, is_train=3, data_loader=test_loader, opt=opt, epo=epo)
             print('testing error: {:.3f}'.format(ret_test['#1']))
             ret_log = np.array([epo, lr_now])
             head = np.array(['epoch', 'lr'])
@@ -112,7 +135,7 @@ def main(opt):
                           is_best=is_best, opt=opt)
 
 
-def run_model(net_pred, optimizer=None, is_train=0, data_loader=None, epo=1, opt=None):
+def run_model(net_pred, net_restore,optimizer=None, is_train=0, data_loader=None, epo=1, opt=None):
     if is_train == 0:
         net_pred.train()
     else:
@@ -132,7 +155,7 @@ def run_model(net_pred, optimizer=None, is_train=0, data_loader=None, epo=1, opt
                          26, 27, 28, 29, 30, 31, 32, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
                          46, 47, 51, 52, 53, 54, 55, 56, 57, 58, 59, 63, 64, 65, 66, 67, 68,
                          75, 76, 77, 78, 79, 80, 81, 82, 83, 87, 88, 89, 90, 91, 92])  # 66
-    seq_in = opt.kernel_size
+    seq_in = opt.input_n
     # joints at same loc
     joint_to_ignore = np.array([16, 20, 23, 24, 28, 31])
     index_to_ignore = np.concatenate((joint_to_ignore * 3, joint_to_ignore * 3 + 1, joint_to_ignore * 3 + 2))
@@ -157,7 +180,17 @@ def run_model(net_pred, optimizer=None, is_train=0, data_loader=None, epo=1, opt
             [-1, seq_in + out_n, len(dim_used) // 3, 3])  # loss calculate
         p3d_src = p3d_h36.clone()[:, :, dim_used]
 
-        p3d_out_all, restore_loss = net_pred(p3d_src, input_n=in_n, output_n=out_n, itera=itera)
+        # with torch.no_grad():
+        #     mask = getMask(batch_size, 10, 0.4)
+        #     src = p3d_src[:,:10].view(batch_size, in_n, 22, 3)
+        #     start = src[:, in_n - 1:in_n]
+        #     # x = src * mask[:, :, :, None] + \
+        #     #     (1 - mask[:, :, :, None]) * self.defaultValue(label)
+        #     x = src * mask[:, :, :, None]
+
+        # input_gcn, restore_loss = net_restore(x,src,mask,start)
+
+        p3d_out_all = net_pred(p3d_src, input_n=in_n, output_n=out_n)
 
         p3d_out = p3d_h36.clone()[:, in_n:in_n + out_n]
         p3d_out[:, :, dim_used] = p3d_out_all[:, seq_in:, 0]
@@ -181,8 +214,10 @@ def run_model(net_pred, optimizer=None, is_train=0, data_loader=None, epo=1, opt
             l_p3d += loss_p3d.cpu().data.numpy() * batch_size
             # loss_p3d += loss.vel_error_3d(p3d_out_all[:, :, 0], p3d_sup)
             # loss_p3d += loss.bone_len_error_3d(bone_out, p3d_h36[:, -out_n - seq_in:])
-            l_retore += restore_loss.cpu().data.numpy() * batch_size
-            loss_all = loss_p3d + restore_loss
+            # l_retore += restore_loss.cpu().data.numpy() * batch_size
+            l_retore += 0
+            # loss_all = loss_p3d + restore_loss
+            loss_all = loss_p3d + 0
             optimizer.zero_grad()
             loss_all.backward()
             nn.utils.clip_grad_norm_(list(net_pred.parameters()), max_norm=opt.max_norm)

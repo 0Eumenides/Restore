@@ -35,6 +35,7 @@ from model.attention import TemporalAdditiveAttention
 #     mask = mask.view(bs, input_n, -1)
 #     return mask.cuda()
 
+# 遮掩的关节为0
 def getMask(bs, input_n, mask_ratio=0.2):
     joint_indices = [2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 17, 18, 19, 21, 22, 25, 26, 27, 29, 30]
     masked_joints_indices = [18, 19, 21, 22, 2, 3, 4, 5]
@@ -132,13 +133,16 @@ class Restoration(Module):
         self.do = nn.Dropout(0.3)
         self.endLinear = nn.Linear(d_model, 3)
 
-    def forward(self, src, label):
+    def forward(self, x, src, mask,start):
         bs = src.shape[0]
-        mask = getMask(bs, self.input_n, 0.4)
-        src = src.view(bs, 10, 22, 3)
-        start = src[:, self.input_n - 1:self.input_n]
-        x = src * mask[:, :, :, None] + \
-            (1 - mask[:, :, :, None]) * self.defaultValue(src * mask[:, :, :, None], label)
+
+        # mask = getMask(bs, self.input_n, 0.4)
+        # src = src.view(bs, 10, 22, 3)
+        # start = src[:, self.input_n - 1:self.input_n]
+        # x = src * mask[:, :, :, None] + \
+        #     (1 - mask[:, :, :, None]) * self.defaultValue(label)
+        # x = src * mask[:, :, :, None]
+
         y = self.embedding(x)
 
         h0 = y

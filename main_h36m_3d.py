@@ -235,7 +235,7 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
     out_n = opt.output_n
 
     # 选择哪些关节被使用
-    jointToUse = [4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+    # jointToUse = [4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 16, 17, 18, 19, 20, 21, 22, 23]
 
     st = time.time()
     for i, (pose, shape, trans) in enumerate(data_loader):
@@ -255,13 +255,13 @@ def run_model(net_pred, smplModel, optimizer=None, is_train=0, data_loader=None,
         gt_trans = trans.view(process_size, 3).float().cuda()
 
         smpl_output = smplModel.forward(gt_shape, gt_pose, gt_trans)
-        gt_joints = smpl_output.joints[:, jointToUse, :]
+        gt_joints = smpl_output.joints[:, 3:22]
 
         motion_pred_data = net_pred(gt_pose)
 
         motion_pred_data = motion_pred_data.view(process_size, -1)
         smpl_output = smplModel.forward(gt_shape, motion_pred_data, gt_trans)
-        pred_joints_data = smpl_output.joints[:, jointToUse, :]
+        pred_joints_data = smpl_output.joints[:, 3:22]
 
         # 2d joint loss:
         # grad_norm = 0

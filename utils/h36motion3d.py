@@ -27,9 +27,7 @@ class Datasets(Dataset):
         self.sample_rate = 2
         self.p3d = {}
         # 用来保存动作标签
-        self.motion = {}
         self.data_idx = []
-        self.angle = {}
         seq_len = self.in_n + self.out_n
         # acts = data_utils.define_actions(actions)
         if opt.test:
@@ -73,7 +71,6 @@ class Datasets(Dataset):
                         the_sequence = torch.from_numpy(the_sequence).float().cuda()
                         # remove global rotation and translation
                         the_sequence[:, 0:6] = 0
-                        self.angle[key] = the_sequence.cpu().data.numpy()
                         # 将指数映射转换成3D坐标，shape(1738,32,3)
                         p3d = data_utils.expmap2xyz_torch(the_sequence)
 
@@ -87,7 +84,6 @@ class Datasets(Dataset):
                         tmp_data_idx_1 = [key] * len(valid_frames)
                         tmp_data_idx_2 = list(valid_frames)
                         self.data_idx.extend(zip(tmp_data_idx_1, tmp_data_idx_2))
-                        self.motion[key] = action_idx
                         key += 1
                 else:
                     print("Reading subject {0}, action {1}, subaction {2}".format(subj, action, 1))
@@ -100,11 +96,9 @@ class Datasets(Dataset):
                     the_sequence1 = np.array(the_sequence1[even_list, :])
                     the_seq1 = torch.from_numpy(the_sequence1).float().cuda()
                     the_seq1[:, 0:6] = 0
-                    self.angle[key] = the_seq1.cpu().data.numpy()
                     p3d1 = data_utils.expmap2xyz_torch(the_seq1)
                     # self.p3d[(subj, action, 1)] = p3d1.view(num_frames1, -1).cpu().data.numpy()
                     self.p3d[key] = p3d1.view(num_frames1, -1).cpu().data.numpy()
-                    self.motion[key] = action_idx
 
                     print("Reading subject {0}, action {1}, subaction {2}".format(subj, action, 2))
                     filename = '{0}/S{1}/{2}_{3}.txt'.format(self.path_to_data, subj, action, 2)
@@ -116,11 +110,9 @@ class Datasets(Dataset):
                     the_sequence2 = np.array(the_sequence2[even_list, :])
                     the_seq2 = torch.from_numpy(the_sequence2).float().cuda()
                     the_seq2[:, 0:6] = 0
-                    self.angle[key + 1] = the_seq2.cpu().data.numpy()
                     p3d2 = data_utils.expmap2xyz_torch(the_seq2)
                     # self.p3d[(subj, action, 2)] = p3d2.view(num_frames2, -1).cpu().data.numpy()
                     self.p3d[key + 1] = p3d2.view(num_frames2, -1).cpu().data.numpy()
-                    self.motion[key + 1] = action_idx
                     # print("action:{}".format(action))
                     # print("subact1:{}".format(num_frames1))
                     # print("subact2:{}".format(num_frames2))
@@ -149,4 +141,4 @@ class Datasets(Dataset):
     def __getitem__(self, item):
         key, start_frame = self.data_idx[item]
         fs = np.arange(start_frame, start_frame + self.in_n + self.out_n)
-        return self.p3d[key][fs], self.angle[key][fs], self.motion[key]
+        return self.p3d[key][fs]
