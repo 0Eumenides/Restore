@@ -54,7 +54,7 @@ class AttModel(Module):
         out_gcn = torch.matmul(idct_m[:, :dct_n].unsqueeze(dim=0),
                                dct_out_tmp[:, :, :dct_n].transpose(1, 2))  # torch.Size([32, 20, 48])
 
-        outputs.append((out_gcn).unsqueeze(2))  # torch.Size([32, 20, 1, 48])
+        outputs.append(out_gcn.unsqueeze(2))  # torch.Size([32, 20, 1, 48])
 
         outputs = torch.cat(outputs, dim=2)  # torch.Size([32, 20, 1, 48])
         return outputs

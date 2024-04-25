@@ -6,7 +6,8 @@ import torch
 # from torch.autograd.variable import Variable
 import os
 from utils import forward_kinematics
-
+from torch.autograd.variable import Variable
+from scipy.ndimage import gaussian_filter1d, median_filter
 
 def rotmat2euler(R):
     """
@@ -554,8 +555,7 @@ def expmap2quat_torch(exp):
 
 def expmap2rotmat_torch(r):
     """
-    Converts expmap matrix to rotation
-    batch pytorch version ported from the corresponding method above
+    Converts expmap matrix to rotation batch pytorch version ported from the corresponding method above
     :param r: N*3
     :return: N*3*3
     """
@@ -582,6 +582,61 @@ def expmap2xyz_torch(expmap):
     """
     parent, offset, rotInd, expmapInd = forward_kinematics._some_variables()
     xyz = forward_kinematics.fkl_torch(expmap, parent, offset, rotInd, expmapInd)
+    return xyz
+
+def rot2xyz_torch(R):
+    """
+    convert rot to joint locations
+    :param rot: N*99
+    :return: N*32*3
+    """
+    n = R.data.shape[0]
+    parent, offset, rotInd, expmapInd = forward_kinematics._some_variables()
+    j_n = offset.shape[0]
+    p3d = Variable(torch.from_numpy(offset)).float().cuda().unsqueeze(0).repeat(n, 1, 1)
+    for i in np.arange(1, j_n):
+        if parent[i] > 0:
+            R[:, i, :, :] = torch.matmul(R[:, i, :, :], R[:, parent[i], :, :]).clone()
+            p3d[:, i, :] = torch.matmul(p3d[0, i, :], R[:, parent[i], :, :]) + p3d[:, parent[i], :]
+    return p3d
+
+smooth_sigma = 6
+smooth_sigma_va = 8
+
+def smooth_euler(angle):
+    angle = torch.from_numpy(angle).float().cuda()
+    angle = angle.view(-1, 3)
+
+    # 假设 rotmat2euler_torch 和 expmap2rotmat_torch 已经在GPU上实现
+    euler = rotmat2euler_torch(expmap2rotmat_torch(angle))
+
+    # 计算和平滑逻辑直接在GPU上完成，最后转回CPU
+    euler = euler.to('cpu').numpy()
+
+    # 处理2π跳变
+    euler_diff = np.diff(euler, axis=0)
+    euler_diff = np.where(np.abs(euler_diff) > np.pi, np.sign(euler_diff) * 2 * np.pi, 0)
+    euler[1:] -= np.cumsum(euler_diff, axis=0)
+
+    # 使用中值和高斯滤波器
+    euler_smooth = np.array([median_filter(euler[:, i], size=smooth_sigma // 2) for i in range(euler.shape[1])]).T
+    euler_smooth = np.array(
+        [gaussian_filter1d(euler_smooth[:, i], sigma=smooth_sigma) for i in range(euler.shape[1])]).T
+
+    # 处理周期性边界条件
+    euler_smooth = np.remainder(euler_smooth + np.pi, 2 * np.pi) - np.pi
+
+    euler_smooth = euler_smooth.reshape(-1, 96)
+
+    return euler_smooth
+
+def expmap2xyz_clear(expmap,parent, offset):
+    """
+    convert expmaps to joint locations
+    :param expmap: N*99
+    :return: N*32*3
+    """
+    xyz = forward_kinematics.fkl_torch(expmap, parent, offset)
     return xyz
 
 def expmap2xyz_torch_no(expmap):

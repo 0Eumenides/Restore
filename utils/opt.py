@@ -39,7 +39,7 @@ class Options:
         # self.parser.add_argument('--input_size', type=int, default=2048, help='the input size of the neural net')
         # self.parser.add_argument('--output_size', type=int, default=85, help='the output size of the neural net')
         self.parser.add_argument('--in_features', type=int, default=54, help='size of each model layer')
-        self.parser.add_argument('--num_stage', type=int, default=12, help='size of each model layer')
+        self.parser.add_argument('--num_stage', type=int, default=6, help='size of each model layer')
         self.parser.add_argument('--d_model', type=int, default=256, help='past frame number')
         self.parser.add_argument('--kernel_size', type=int, default=5, help='past frame number')
         self.parser.add_argument('--increment', type=bool, default=True, help='use increament learning')

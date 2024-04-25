@@ -6,6 +6,8 @@ from utils import data_utils
 from matplotlib import pyplot as plt
 import torch
 
+from utils.data_utils import smooth_euler
+from tqdm import tqdm
 
 class Datasets(Dataset):
 
@@ -19,7 +21,7 @@ class Datasets(Dataset):
         :param split: 0 train, 1 testing, 2 validation
         :param sample_rate:
         """
-        self.path_to_data = "/data/dth/h3.6m/dataset"
+        self.path_to_data = "/data2/dth/h3.6m/dataset"
         self.split = split
         self.in_n = opt.input_n
         self.out_n = opt.output_n
@@ -51,13 +53,13 @@ class Datasets(Dataset):
             acts = ['walking']
 
         subs = subs[split]
-
-        for subj in subs:
-            for action_idx in np.arange(len(acts)):
+        key =0
+        for subj in tqdm(subs, desc="Processing subjects"):
+            for action_idx in tqdm(range(len(acts)), desc="Processing actions", leave=False):
                 action = acts[action_idx]
                 if self.split <= 1:
                     for subact in [1, 2]:  # subactions
-                        print("Reading subject {0}, action {1}, subaction {2}".format(subj, action, subact))
+                        # print("Reading subject {0}, action {1}, subaction {2}".format(subj, action, subact))
                         filename = '{0}/S{1}/{2}_{3}.txt'.format(self.path_to_data, subj, action, subact)
                         the_sequence = data_utils.readCSVasFloat(filename)
                         n, d = the_sequence.shape
@@ -66,17 +68,21 @@ class Datasets(Dataset):
                         the_sequence = np.array(the_sequence[even_list, :])
                         # the_sequence = torch.from_numpy(the_sequence).float().cuda()
                         # remove global rotation and translation
-                        the_sequence[:, 0:6] = 0
-                        # p3d = data_utils.expmap2xyz_torch(the_sequence)
-                        self.seq[(subj, action, subact)] = the_sequence
+                        the_sequence = the_sequence[:, 3:]
+                        the_sequence[:, 0:3] = 0
+                        the_sequence = smooth_euler(the_sequence)
+
+                        self.seq[key] = the_sequence
 
                         valid_frames = np.arange(0, num_frames - seq_len + 1, opt.skip_rate)
 
-                        tmp_data_idx_1 = [(subj, action, subact)] * len(valid_frames)
+                        tmp_data_idx_1 = [key] * len(valid_frames)
                         tmp_data_idx_2 = list(valid_frames)
+
                         self.data_idx.extend(zip(tmp_data_idx_1, tmp_data_idx_2))
+                        key+=1
                 else:
-                    print("Reading subject {0}, action {1}, subaction {2}".format(subj, action, 1))
+                    # print("Reading subject {0}, action {1}, subaction {2}".format(subj, action, 1))
                     filename = '{0}/S{1}/{2}_{3}.txt'.format(self.path_to_data, subj, action, 1)
                     the_sequence1 = data_utils.readCSVasFloat(filename)
                     n, d = the_sequence1.shape
@@ -87,9 +93,9 @@ class Datasets(Dataset):
                     # the_seq1 = torch.from_numpy(the_sequence1).float().cuda()
                     the_sequence1[:, 0:6] = 0
                     # p3d1 = data_utils.expmap2xyz_torch(the_seq1)
-                    self.seq[(subj, action, 1)] = the_sequence1
+                    self.seq[key] = the_sequence1
 
-                    print("Reading subject {0}, action {1}, subaction {2}".format(subj, action, 2))
+                    # print("Reading subject {0}, action {1}, subaction {2}".format(subj, action, 2))
                     filename = '{0}/S{1}/{2}_{3}.txt'.format(self.path_to_data, subj, action, 2)
                     the_sequence2 = data_utils.readCSVasFloat(filename)
                     n, d = the_sequence2.shape
@@ -100,22 +106,24 @@ class Datasets(Dataset):
                     # the_seq2 = torch.from_numpy(the_sequence2).float().cuda()
                     the_sequence2[:, 0:6] = 0
                     # p3d2 = data_utils.expmap2xyz_torch(the_seq2)
-                    self.seq[(subj, action, 2)] = the_sequence2
+                    self.seq[key+1] = the_sequence2
 
                     # fs_sel1, fs_sel2 = data_utils.find_indices_256(num_frames1, num_frames2, seq_len,
                     #                                                 input_n=self.in_n)
-                    fs_sel1, fs_sel2 = data_utils.find_indices_srnn(num_frames1, num_frames2, seq_len,
+                    fs_sel1, fs_sel2 = data_utils.find_indices_256(num_frames1, num_frames2, seq_len,
                                                                     input_n=self.in_n)
 
                     valid_frames = fs_sel1[:, 0]
-                    tmp_data_idx_1 = [(subj, action, 1)] * len(valid_frames)
+                    tmp_data_idx_1 = [key] * len(valid_frames)
                     tmp_data_idx_2 = list(valid_frames)
                     self.data_idx.extend(zip(tmp_data_idx_1, tmp_data_idx_2))
 
                     valid_frames = fs_sel2[:, 0]
-                    tmp_data_idx_1 = [(subj, action, 2)] * len(valid_frames)
+                    tmp_data_idx_1 = [key+1] * len(valid_frames)
                     tmp_data_idx_2 = list(valid_frames)
                     self.data_idx.extend(zip(tmp_data_idx_1, tmp_data_idx_2))
+                    key+=2
+
 
     def __len__(self):
         return np.shape(self.data_idx)[0]

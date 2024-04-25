@@ -106,7 +106,7 @@ def main(opt):
             head = np.append(head, ['test'])
             log.save_csv_log(opt, head, ret_log, is_create=(epo == 1))
             if ret_valid['m_p3d_h36'] < err_best:
-                err_best = ret_valid
+                err_best = ret_valid['m_p3d_h36']
                 is_best = True
             log.save_ckpt({'epoch': epo,
                            'lr': lr_now,
@@ -122,10 +122,9 @@ def run_model(net_restore,optimizer=None, is_train=0, data_loader=None, opt=None
 
     l_p3d = 0
     l_retore = 0
-    if is_train <= 1:
-        m_p3d_h36 = 0
-    else:
-        m_p3d_h36 = 0
+
+    m_p3d_h36 = 0
+
     n = 0
     in_n = opt.input_n
 

@@ -1,4 +1,6 @@
-from utils import h36motion3d as datasets
+import pickle
+
+from utils import h36motion as datasets, data_utils
 from model import AttModel, Restoration
 from utils.opt import Options
 from utils import util
@@ -13,7 +15,24 @@ import h5py
 import torch.optim as optim
 import os
 
+import utils.forward_kinematics as fk
 os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+smooth_sigma = 6
+smooth_sigma_va = 8
+
+def save_dataset(dataset, file_name):
+    with open(file_name, 'wb') as f:
+        pickle.dump(dataset, f)
+
+def load_dataset(file_name):
+    try:
+        with open(file_name, 'rb') as f:
+            dataset = pickle.load(f)
+        print("Dataset loaded successfully.")
+        return dataset
+    except FileNotFoundError:
+        print("No saved dataset file found.")
+        return None
 
 def getMask(bs, input_n, mask_ratio=0.2):
     joint_indices = [2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 17, 18, 19, 21, 22, 25, 26, 27, 29, 30]
@@ -75,15 +94,26 @@ def main(opt):
         #            "greeting", "phoning", "posing", "purchases", "sitting",
         #            "sittingdown", "takingphoto", "waiting", "walkingdog",
         #            "walkingtogether"]
-        dataset = datasets.Datasets(opt, split=0)
+        dataset = load_dataset('train.pkl')
+        if dataset is None:
+            dataset = datasets.Datasets(opt, split=0)
+            save_dataset(dataset, 'train.pkl')
         print('>>> Training dataset length: {:d}'.format(dataset.__len__()))
         data_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=True, num_workers=0, pin_memory=True)
-        valid_dataset = datasets.Datasets(opt, split=1)
+
+        valid_dataset = load_dataset('valid.pkl')
+        if valid_dataset is None:
+            valid_dataset = datasets.Datasets(opt, split=1)
+            save_dataset(valid_dataset, 'valid.pkl')
+
         print('>>> Validation dataset length: {:d}'.format(valid_dataset.__len__()))
         valid_loader = DataLoader(valid_dataset, batch_size=opt.test_batch_size, shuffle=True, num_workers=0,
                                   pin_memory=True)
 
-    test_dataset = datasets.Datasets(opt, split=2)
+    test_dataset = load_dataset('test.pkl')
+    if test_dataset is None:
+        test_dataset = datasets.Datasets(opt, split=2)
+        save_dataset(test_dataset, 'test.pkl')
     print('>>> Testing dataset length: {:d}'.format(test_dataset.__len__()))
     test_loader = DataLoader(test_dataset, batch_size=opt.test_batch_size, shuffle=False, num_workers=0,
                              pin_memory=True)
@@ -142,7 +172,6 @@ def run_model(net_pred, net_restore,optimizer=None, is_train=0, data_loader=None
         net_pred.eval()
 
     l_p3d = 0
-    l_retore = 0
     if is_train <= 1:
         m_p3d_h36 = 0
     else:
@@ -151,21 +180,22 @@ def run_model(net_pred, net_restore,optimizer=None, is_train=0, data_loader=None
     n = 0
     in_n = opt.input_n
     out_n = opt.output_n
-    dim_used = np.array([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25,
-                         26, 27, 28, 29, 30, 31, 32, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-                         46, 47, 51, 52, 53, 54, 55, 56, 57, 58, 59, 63, 64, 65, 66, 67, 68,
-                         75, 76, 77, 78, 79, 80, 81, 82, 83, 87, 88, 89, 90, 91, 92])  # 66
     seq_in = opt.input_n
     # joints at same loc
-    joint_to_ignore = np.array([16, 20, 23, 24, 28, 31])
-    index_to_ignore = np.concatenate((joint_to_ignore * 3, joint_to_ignore * 3 + 1, joint_to_ignore * 3 + 2))
-    joint_equal = np.array([13, 19, 22, 13, 27, 30])
-    index_to_equal = np.concatenate((joint_equal * 3, joint_equal * 3 + 1, joint_equal * 3 + 2))
 
     itera = 1
-    idx = np.expand_dims(np.arange(seq_in + out_n), axis=1) + (
-            out_n - seq_in + np.expand_dims(np.arange(itera), axis=0))
     st = time.time()
+
+    dim_used_p3d = np.array([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25,
+                         26, 27, 28, 29, 30, 31, 32, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
+                         46, 47, 51, 52, 53, 54, 55, 56, 57, 58, 59, 63, 64, 65, 66, 67, 68,
+                         75, 76, 77, 78, 79, 80, 81, 82, 83, 87, 88, 89, 90, 91, 92])
+
+    dim_used_angle=np.array([6,  7,   8, 9,  10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 23,
+                         24, 25, 26, 27, 28, 29, 30, 31, 32, 36, 37, 38, 39, 40, 41,
+                         42, 43, 44, 45, 46, 47, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+                         60, 61, 62, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86])-3  # 60
+
     for i, (p3d_h36) in enumerate(data_loader):
         # print(i)
         batch_size, seq_n, _ = p3d_h36.shape
@@ -175,49 +205,45 @@ def run_model(net_pred, net_restore,optimizer=None, is_train=0, data_loader=None
         n += batch_size
         bt = time.time()
 
-        p3d_h36 = p3d_h36.float().cuda()
-        p3d_sup = p3d_h36.clone()[:, :, dim_used][:, -out_n - seq_in:].reshape(
-            [-1, seq_in + out_n, len(dim_used) // 3, 3])  # loss calculate
-        p3d_src = p3d_h36.clone()[:, :, dim_used]
+        euler_smooth = p3d_h36.float().cuda()
 
-        # with torch.no_grad():
-        #     mask = getMask(batch_size, 10, 0.4)
-        #     src = p3d_src[:,:10].view(batch_size, in_n, 22, 3)
-        #     start = src[:, in_n - 1:in_n]
-        #     # x = src * mask[:, :, :, None] + \
-        #     #     (1 - mask[:, :, :, None]) * self.defaultValue(label)
-        #     x = src * mask[:, :, :, None]
 
-        # input_gcn, restore_loss = net_restore(x,src,mask,start)
+        euler_smooth = euler_smooth.view(-1,96)
 
+        with torch.no_grad():
+            eulerToRot = util.eulerToRot(euler_smooth)
+            gt_pose = data_utils.rot2xyz_torch(eulerToRot)
+            gt_pose = gt_pose.view(batch_size, in_n + out_n, 32, 3)
+
+        euler_smooth = euler_smooth.view(batch_size, in_n + out_n, 96)
+
+        p3d_src = euler_smooth.clone()[:, :, dim_used_angle]
         p3d_out_all = net_pred(p3d_src, input_n=in_n, output_n=out_n)
+        p3d_out_all = p3d_out_all[:,:,0]
 
-        p3d_out = p3d_h36.clone()[:, in_n:in_n + out_n]
-        p3d_out[:, :, dim_used] = p3d_out_all[:, seq_in:, 0]
-        p3d_out[:, :, index_to_ignore] = p3d_out[:, :, index_to_equal]
-        p3d_out = p3d_out.reshape([-1, out_n, 32, 3])
+        p3d_out = euler_smooth.clone()
+        p3d_out[:, :, dim_used_angle] = p3d_out_all
 
-        # 骨长损失的预测值 shape为(32, 20, 32, 3)
-        # bone_out = p3d_h36.clone()[:, -out_n - seq_in:]
-        # bone_out[:, :, dim_used] = p3d_out_all[:, :, 0]
-        # bone_out[:, :, index_to_ignore] = bone_out[:, :, index_to_equal]
-        # bone_out = bone_out.reshape([-1, out_n+seq_in, 32, 3])  # shape(32,10,32,3)
+        p3d_out = p3d_out.reshape(-1, 96)
+        with torch.no_grad():
+            eulerToRot = util.eulerToRot(p3d_out)
+            pre_pose = data_utils.rot2xyz_torch(eulerToRot)
+            pre_pose = pre_pose.view(batch_size, in_n + out_n, 32, 3)
 
-        p3d_h36 = p3d_h36.reshape([-1, in_n + out_n, 32, 3])
-
-        p3d_out_all = p3d_out_all.reshape([batch_size, seq_in + out_n, itera, len(dim_used) // 3, 3])
+        p3d_sup = euler_smooth.clone()[:, :,dim_used_angle]
 
         # 2d joint loss:
         grad_norm = 0
         if is_train == 0:
-            loss_p3d = torch.mean(torch.norm(p3d_out_all[:, :, 0] - p3d_sup, dim=3))
-            l_p3d += loss_p3d.cpu().data.numpy() * batch_size
-            # loss_p3d += loss.vel_error_3d(p3d_out_all[:, :, 0], p3d_sup)
-            # loss_p3d += loss.bone_len_error_3d(bone_out, p3d_h36[:, -out_n - seq_in:])
-            # l_retore += restore_loss.cpu().data.numpy() * batch_size
-            l_retore += 0
+            # 3d坐标
+            loss_p3d = torch.mean(torch.norm(pre_pose - gt_pose, dim=3))
+
+            # 旋转角
+            # loss_ang = torch.mean(torch.norm(p3d_out_all - p3d_sup, dim=2))
+            loss_ang = torch.mean(torch.sum(torch.abs(p3d_out_all - p3d_sup), dim=2))
             # loss_all = loss_p3d + restore_loss
-            loss_all = loss_p3d + 0
+            loss_all = loss_ang + loss_p3d
+
             optimizer.zero_grad()
             loss_all.backward()
             nn.utils.clip_grad_norm_(list(net_pred.parameters()), max_norm=opt.max_norm)
@@ -225,18 +251,19 @@ def run_model(net_pred, net_restore,optimizer=None, is_train=0, data_loader=None
             # update log values
 
         if is_train <= 1:  # if is validation or train simply output the overall mean error
-            mpjpe_p3d_h36 = torch.mean(torch.norm(p3d_h36[:, in_n:in_n + out_n] - p3d_out, dim=3))
+            mpjpe_p3d_h36 = torch.mean(torch.norm(pre_pose[:,in_n:] - gt_pose[:,in_n:], dim=3))
             m_p3d_h36 += mpjpe_p3d_h36.cpu().data.numpy() * batch_size
         else:
-            mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(p3d_h36[:, in_n:] - p3d_out, dim=3), dim=2), dim=0)
+            mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(pre_pose[:,in_n:] - gt_pose[:,in_n:], dim=3), dim=2), dim=0)
+            mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(pre_pose[:,in_n:] - gt_pose[:,in_n:], dim=3), dim=2), dim=0)
             m_p3d_h36 += mpjpe_p3d_h36.cpu().data.numpy()
         if i % 1000 == 0:
             print('{}/{}|bt {:.3f}s|tt{:.0f}s|gn{}'.format(i + 1, len(data_loader), time.time() - bt,
                                                            time.time() - st, grad_norm))
+
     ret = {}
     if is_train == 0:
-        ret["l_p3d"] = l_p3d / n
-        ret["l_retore"] = l_retore / n
+        ret["m_p3d_h36"] = m_p3d_h36 / n
     if is_train <= 1:
         ret["m_p3d_h36"] = m_p3d_h36 / n
     else:
