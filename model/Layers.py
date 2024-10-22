@@ -38,16 +38,16 @@ class PositionalEncoder(nn.Module):
 
 
 class DefaultValue(nn.Module):
-    def __init__(self, label_num, node_n, d_model):
+    def __init__(self, label_num, input_n, node_n, d_model, ):
         super(DefaultValue, self).__init__()
-        self.value = nn.Parameter(torch.randn(label_num, node_n, d_model), requires_grad=True)
-        self.mlp = nn.Linear(d_model, 3)
+        self.value = nn.Parameter(torch.randn(label_num, input_n, node_n, d_model), requires_grad=True)
+        self.mlp = nn.Linear(d_model, d_model)
         self.reset_parameters()
 
-    def forward(self, label):
+    def forward(self):
         """"""
         # center = self.compute_pose_center(src)
-        return self.mlp(self.value[label]).unsqueeze(1).repeat(1, 10, 1, 1)
+        return self.mlp(self.value)
         # center = self.compute_pose_center(src)  # 形状: (批大小, 时间步, 3)
         #
         # # 获取每个标签对应的默认节点值

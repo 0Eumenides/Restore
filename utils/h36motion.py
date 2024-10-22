@@ -21,7 +21,7 @@ class Datasets(Dataset):
         :param split: 0 train, 1 testing, 2 validation
         :param sample_rate:
         """
-        self.path_to_data = "/data2/dth/h3.6m/dataset"
+        self.path_to_data = "/data/dth/h3.6m/dataset"
         self.split = split
         self.in_n = opt.input_n
         self.out_n = opt.output_n
@@ -91,7 +91,9 @@ class Datasets(Dataset):
                     num_frames1 = len(even_list)
                     the_sequence1 = np.array(the_sequence1[even_list, :])
                     # the_seq1 = torch.from_numpy(the_sequence1).float().cuda()
-                    the_sequence1[:, 0:6] = 0
+                    the_sequence1 = the_sequence1[:, 3:]
+                    the_sequence1[:, 0:3] = 0
+                    the_sequence1 = smooth_euler(the_sequence1)
                     # p3d1 = data_utils.expmap2xyz_torch(the_seq1)
                     self.seq[key] = the_sequence1
 
@@ -104,7 +106,9 @@ class Datasets(Dataset):
                     num_frames2 = len(even_list)
                     the_sequence2 = np.array(the_sequence2[even_list, :])
                     # the_seq2 = torch.from_numpy(the_sequence2).float().cuda()
-                    the_sequence2[:, 0:6] = 0
+                    the_sequence2 = the_sequence2[:, 3:]
+                    the_sequence2[:, 0:3] = 0
+                    the_sequence2 = smooth_euler(the_sequence2)
                     # p3d2 = data_utils.expmap2xyz_torch(the_seq2)
                     self.seq[key+1] = the_sequence2
 

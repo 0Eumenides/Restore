@@ -241,50 +241,63 @@ def batch_roteulerSMPL(angle):
 
 
 def eulerToRot(angle):
+    B = angle.size(0)
+
+    # 假设有32个关节，每个关节有3个欧拉角，总共96个角度
+    num_joints = 32
+    num_angles = num_joints * 3  # 3个角度/关节
+
+    # 将整个角度矩阵转换为旋转矩阵
+    rot_mats, _ = batch_euler2matzyx(angle.view(-1, 3))
+
+    # 重新形状为 [B, num_joints, 3, 3]
+    rot_mats = rot_mats.view(B, num_joints, 3, 3)
+
+    return rot_mats
 
     B = angle.size(0)
 
-    # 0号关节
-    rotMat_root_1, _ = batch_euler2matyzx(angle[:, :3].reshape(-1, 3))
-    # 躯干部分1-10号关节
-    rotMat_s_1, _ = batch_euler2matzyx(angle[:, 3:33].reshape(-1, 3))
-    # 11号关节
-    rotMat_root_2, _ = batch_euler2matyzx(angle[:, 33:36].reshape(-1, 3))
-    # 躯干部分12-16号关节
-    rotMat_s_2, _ = batch_euler2matzyx(angle[:, 36:51].reshape(-1, 3))
-    # 17肩关节
-    rotMat_shoulder_1, _ = batch_euler2matzxy(angle[:, 51:54].reshape(-1, 3))
-    # 18肘关节
-    rotMat_elbow_1, _ = batch_euler2matyzx(angle[:, 54:57].reshape(-1, 3))
-    # 19-23手腕关节
-    rotMat_e_1, _ = batch_euler2matzyx(angle[:, 57:72].reshape(-1, 3))
-    # 24躯干部分
-    rotMat_s_3, _ = batch_euler2matzyx(angle[:, 72:75].reshape(-1, 3))
-    # 25肩关节
-    rotMat_shoulder_2, _ = batch_euler2matzxy(angle[:, 75:78].reshape(-1, 3))
-    # 26肘关节
-    rotMat_elbow_2, _ = batch_euler2matyzx(angle[:, 78:81].reshape(-1, 3))
-    # 27-31手腕关节
-    rotMat_e_2, _ = batch_euler2matzyx(angle[:, 81:96].reshape(-1, 3))
-
-    # 重新塑形每个部分的旋转矩阵以符合批次的结构
-    rotMat_root_1 = rotMat_root_1.reshape(B, 1, 3, 3)
-    rotMat_s_1 = rotMat_s_1.reshape(B, 10, 3, 3)  # 1-10号关节，共10个
-    rotMat_root_2 = rotMat_root_2.reshape(B, 1, 3, 3)  # 11号关节
-    rotMat_s_2 = rotMat_s_2.reshape(B, 5, 3, 3)  # 12-16号关节，共5个
-    rotMat_shoulder_1 = rotMat_shoulder_1.reshape(B, 1, 3, 3)  # 17号关节
-    rotMat_elbow_1 = rotMat_elbow_1.reshape(B, 1, 3, 3)  # 18号关节
-    rotMat_e_1 = rotMat_e_1.reshape(B, 5, 3, 3)  # 19-23号关节，共5个
-    rotMat_s_3 = rotMat_s_3.reshape(B, 1, 3, 3)  # 24号关节
-    rotMat_shoulder_2 = rotMat_shoulder_2.reshape(B, 1, 3, 3)  # 25号关节
-    rotMat_elbow_2 = rotMat_elbow_2.reshape(B, 1, 3, 3)  # 26号关节
-    rotMat_e_2 = rotMat_e_2.reshape(B, 5, 3, 3)  # 27-31号关节，共5个
-
-    # 合并所有的旋转矩阵
-    rotMat = torch.cat((rotMat_root_1, rotMat_s_1, rotMat_root_2, rotMat_s_2, rotMat_shoulder_1, rotMat_elbow_1,
-                        rotMat_e_1, rotMat_s_3, rotMat_shoulder_2, rotMat_elbow_2, rotMat_e_2), dim=1)
-
-    return rotMat
+    # # 0号关节
+    # rotMat_root_1, _ = batch_euler2matyzx(angle[:, :3].reshape(-1, 3))
+    # # 躯干部分1-10号关节
+    # rotMat_s_1, _ = batch_euler2matzyx(angle[:, 3:33].reshape(-1, 3))
+    # # 11号关节
+    # rotMat_root_2, _ = batch_euler2matyzx(angle[:, 33:36].reshape(-1, 3))
+    # # 躯干部分12-16号关节
+    # rotMat_s_2, _ = batch_euler2matzyx(angle[:, 36:51].reshape(-1, 3))
+    # # 17肩关节
+    # rotMat_shoulder_1, _ = batch_euler2matzxy(angle[:, 51:54].reshape(-1, 3))
+    # # 18肘关节
+    # rotMat_elbow_1, _ = batch_euler2matyzx(angle[:, 54:57].reshape(-1, 3))
+    # # 19-23手腕关节
+    # rotMat_e_1, _ = batch_euler2matzyx(angle[:, 57:72].reshape(-1, 3))
+    # # 24躯干部分
+    # rotMat_s_3, _ = batch_euler2matzyx(angle[:, 72:75].reshape(-1, 3))
+    # # 25肩关节
+    # rotMat_shoulder_2, _ = batch_euler2matzxy(angle[:, 75:78].reshape(-1, 3))
+    # # 26肘关节
+    # rotMat_elbow_2, _ = batch_euler2matyzx(angle[:, 78:81].reshape(-1, 3))
+    # # 27-31手腕关节
+    # rotMat_e_2, _ = batch_euler2matzyx(angle[:, 81:96].reshape(-1, 3))
+    #
+    # # 重新塑形每个部分的旋转矩阵以符合批次的结构
+    # rotMat_root_1 = rotMat_root_1.reshape(B, 1, 3, 3)
+    # rotMat_s_1 = rotMat_s_1.reshape(B, 10, 3, 3)  # 1-10号关节，共10个
+    # rotMat_root_2 = rotMat_root_2.reshape(B, 1, 3, 3)  # 11号关节
+    # rotMat_s_2 = rotMat_s_2.reshape(B, 5, 3, 3)  # 12-16号关节，共5个
+    # rotMat_shoulder_1 = rotMat_shoulder_1.reshape(B, 1, 3, 3)  # 17号关节
+    # rotMat_elbow_1 = rotMat_elbow_1.reshape(B, 1, 3, 3)  # 18号关节
+    # rotMat_e_1 = rotMat_e_1.reshape(B, 5, 3, 3)  # 19-23号关节，共5个
+    # rotMat_s_3 = rotMat_s_3.reshape(B, 1, 3, 3)  # 24号关节
+    # rotMat_shoulder_2 = rotMat_shoulder_2.reshape(B, 1, 3, 3)  # 25号关节
+    # rotMat_elbow_2 = rotMat_elbow_2.reshape(B, 1, 3, 3)  # 26号关节
+    # rotMat_e_2 = rotMat_e_2.reshape(B, 5, 3, 3)  # 27-31号关节，共5个
+    #
+    # # 合并所有的旋转矩阵
+    # rotMat = torch.cat((rotMat_root_1, rotMat_s_1, rotMat_root_2, rotMat_s_2, rotMat_shoulder_1, rotMat_elbow_1,
+    #                     rotMat_e_1, rotMat_s_3, rotMat_shoulder_2, rotMat_elbow_2, rotMat_e_2), dim=1)
+    #
+    # return rotMat
 
 
 def forward_kinematics(smplModel, pose, shape, joints_smpl=False):

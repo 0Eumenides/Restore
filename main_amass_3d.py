@@ -17,20 +17,42 @@ import h5py
 import torch.optim as optim
 
 
+def getMask(bs, input_n, mask_ratio=0.2):
+    joint_indices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+    masked_joints_indices = [7, 8, 10, 11, 20, 21, 22, 23]
+    # masked_joints_indices = [2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 17, 18, 19, 21, 22, 25, 26, 27, 29, 30]
+    # 将全局关节编号转换为局部索引
+    masked_joint_local_indices = [joint_indices.index(joint) for joint in masked_joints_indices]
+
+    # 创建遮掩数组，初始全部设置为 1
+    mask = torch.ones((bs, input_n, len(joint_indices)))
+
+    # 计算每个关节需要遮掩的数量
+    num_to_mask_per_joint = int(input_n * mask_ratio)
+
+    # 遍历需要遮掩的关节索引
+    for joint in masked_joint_local_indices:
+        # 对每个批次中的每个关节进行遮掩
+        for i in range(bs):
+            # 随机选择需要遮掩的时间步
+            time_steps_to_mask = torch.randperm(input_n)[:num_to_mask_per_joint]
+            mask[i, time_steps_to_mask, joint] = 0
+
+    return mask.cuda()
+
+
 def main(opt):
     lr_now = opt.lr_now
     start_epoch = 1
     # opt.is_eval = True
     print('>>> create models')
-    in_features = opt.in_features  # 54
-    d_model = opt.d_model
-    kernel_size = opt.kernel_size
-    net_pred = AttModel.AttModel(in_features=in_features, kernel_size=kernel_size, d_model=d_model,
-                                 num_stage=opt.num_stage, dct_n=opt.dct_n)
-    net_pred.cuda()
 
-    optimizer = optim.Adam(filter(lambda x: x.requires_grad, net_pred.parameters()), lr=opt.lr_now)
-    print(">>> total params: {:.2f}M".format(sum(p.numel() for p in net_pred.parameters()) / 1000000.0))
+    net_restore = Restoration.Restoration(input_n=opt.input_n, d_model=128, num_stage=12, eta=6)
+
+    net_restore.cuda()
+
+    optimizer = optim.Adam(filter(lambda x: x.requires_grad, net_restore.parameters()), lr=opt.lr_now)
+    print(">>> total params: {:.2f}M".format(sum(p.numel() for p in net_restore.parameters()) / 1000000.0))
 
     if opt.is_load or opt.is_eval:
         model_path_len = './{}/ckpt_best.pth.tar'.format(opt.ckpt)
@@ -39,7 +61,7 @@ def main(opt):
         start_epoch = ckpt['epoch'] + 1
         err_best = ckpt['err']
         lr_now = ckpt['lr']
-        net_pred.load_state_dict(ckpt['state_dict'])
+        net_restore.load_state_dict(ckpt['state_dict'])
         # net.load_state_dict(ckpt)
         # optimizer.load_state_dict(ckpt['optimizer'])
         # lr_now = util.lr_decay_mine(optimizer, lr_now, 0.2)
@@ -63,7 +85,7 @@ def main(opt):
 
     # evaluation
     if opt.is_eval:
-        ret_test = run_model(net_pred, is_train=3, data_loader=test_loader, opt=opt, epo=0)
+        ret_test = run_model(net_restore, is_train=3, data_loader=test_loader, opt=opt, epo=0)
         ret_log = np.array([])
         head = np.array([])
         for k in ret_test.keys():
@@ -79,23 +101,20 @@ def main(opt):
             # if epo % opt.lr_decay == 0:
             lr_now = util.lr_decay_mine(optimizer, lr_now, 0.1 ** (1 / opt.epoch))
             print('>>> training epoch: {:d}'.format(epo))
-            ret_train = run_model(net_pred, optimizer, is_train=0, data_loader=data_loader, epo=epo, opt=opt)
+            ret_train = run_model(net_restore, optimizer, is_train=0, data_loader=data_loader, epo=epo, opt=opt)
             print('train error: {:.3f}'.format(ret_train['m_p3d_h36']))
-            ret_valid = run_model(net_pred, is_train=1, data_loader=valid_loader, opt=opt, epo=epo)
+            ret_valid = run_model(net_restore, is_train=1, data_loader=valid_loader, opt=opt, epo=epo)
             print('validation error: {:.3f}'.format(ret_valid['m_p3d_h36']))
-            ret_test = run_model(net_pred, is_train=2, data_loader=test_loader, opt=opt, epo=epo)
-            print('testing error: {:.3f}'.format(ret_test['#1']))
+            ret_test = run_model(net_restore, is_train=2, data_loader=test_loader, opt=opt, epo=epo)
+            print('testing error: {:.3f}'.format(ret_test['m_p3d_h36']))
             ret_log = np.array([epo, lr_now])
             head = np.array(['epoch', 'lr'])
-            for k in ret_train.keys():
-                ret_log = np.append(ret_log, [ret_train[k]])
-                head = np.append(head, [k])
-            for k in ret_valid.keys():
-                ret_log = np.append(ret_log, [ret_valid[k]])
-                head = np.append(head, ['valid_' + k])
-            for k in ret_test.keys():
-                ret_log = np.append(ret_log, [ret_test[k]])
-                head = np.append(head, ['test_' + k])
+            ret_log = np.append(ret_log, [ret_test['m_p3d_h36']])
+            head = np.append(head, ['train'])
+            ret_log = np.append(ret_log, [ret_test['m_p3d_h36']])
+            head = np.append(head, ['valid'])
+            ret_log = np.append(ret_log, [ret_test['m_p3d_h36']])
+            head = np.append(head, ['test_'])
             log.save_csv_log(opt, head, ret_log, is_create=(epo == 1))
             if ret_valid['m_p3d_h36'] < err_best:
                 err_best = ret_valid['m_p3d_h36']
@@ -103,82 +122,77 @@ def main(opt):
             log.save_ckpt({'epoch': epo,
                            'lr': lr_now,
                            'err': ret_valid['m_p3d_h36'],
-                           'state_dict': net_pred.state_dict(),
+                           'state_dict': net_restore.state_dict(),
                            'optimizer': optimizer.state_dict()},
                           is_best=is_best, opt=opt)
 
 
-def run_model(net_pred, optimizer=None, is_train=0, data_loader=None, epo=1, opt=None):
+def run_model(net_restore, optimizer=None, is_train=0, data_loader=None, epo=1, opt=None):
     if is_train == 0:
-        net_pred.train()
+        net_restore.train()
     else:
-        net_pred.eval()
+        net_restore.eval()
 
-    l_p3d = 0
-    # l_beta = 0
-    # j17to14 = [6, 5, 4, 1, 2, 3, 16, 15, 14, 11, 12, 13, 8, 10]
-    if is_train <= 1:
-        m_p3d_h36 = 0
-    else:
-        titles = np.array(range(opt.output_n)) + 1
-        m_p3d_h36 = np.zeros([opt.output_n])
+    l_retore = 0
+
+    m_p3d_h36 = 0
+
     n = 0
-    itera = 1
+
     in_n = opt.input_n
     out_n = opt.output_n
-    joint_used = np.arange(4, 22)
-    seq_in = opt.kernel_size
-    idx = np.expand_dims(np.arange(seq_in + 1), axis=1) + np.expand_dims(np.arange(out_n), axis=0)
+
+    joint_used = np.arange(1, 24)
+
     st = time.time()
     for i, (p3d_h36) in enumerate(data_loader):
-        batch_size, seq_n, _, _ = p3d_h36.shape
+        batch_size, seq_n, _ = p3d_h36.shape
+        p3d_h36 = p3d_h36.reshape(batch_size, seq_n, -1, 3)
         n += batch_size
         bt = time.time()
-        p3d_h36 = p3d_h36.float().cuda()[:, :, joint_used] * 1000
-        p3d_sup = p3d_h36.clone()[:, -out_n - seq_in:]
+        p3d_h36 = p3d_h36.float().cuda()[:, :, joint_used]
+
         p3d_src = p3d_h36.clone().reshape([batch_size, in_n + out_n, len(joint_used) * 3])
 
-        p3d_out_all = net_pred(p3d_src, output_n=out_n, input_n=in_n, itera=itera)
+        with torch.no_grad():
+            mask = getMask(batch_size, in_n, 0.4)
+            src = p3d_src[:, :in_n].view(batch_size, in_n, 23, 3)
+            start = src[:, in_n - 1:in_n]
+            # x = src * mask[:, :, :, None] + \
+            #     (1 - mask[:, :, :, None]) * self.defaultValue(label)
+            x = src * mask[:, :, :, None]
 
-        p3d_out = p3d_out_all[:, seq_in:].reshape([batch_size, out_n, len(joint_used), 3])
-
-        p3d_out_all = p3d_out_all[:, :, 0].reshape([batch_size, seq_in + out_n, len(joint_used), 3])
+        input_gcn, restore_loss = net_restore(x, src, mask, start)
 
         # 2d joint loss:
         grad_norm = 0
         if is_train == 0:
-            # loss_p3d = torch.mean(torch.sum(torch.abs(p3d_out_all - p3d_sup), dim=4))
-            loss_p3d = torch.mean(torch.norm(p3d_out_all - p3d_sup, dim=3))
+            l_retore += restore_loss
 
-            loss_all = loss_p3d
+            loss_all = restore_loss
             optimizer.zero_grad()
             loss_all.backward()
-            nn.utils.clip_grad_norm_(list(net_pred.parameters()), max_norm=opt.max_norm)
+            nn.utils.clip_grad_norm_(list(net_restore.parameters()), max_norm=1)
             optimizer.step()
             # update log values
-            l_p3d += loss_p3d.cpu().data.numpy() * batch_size
 
         if is_train <= 1:  # if is validation or train simply output the overall mean error
-            mpjpe_p3d_h36 = torch.mean(torch.norm(p3d_h36[:, in_n:in_n + out_n] - p3d_out, dim=3))
-            m_p3d_h36 += mpjpe_p3d_h36.cpu().data.numpy() * batch_size
+            m_p3d_h36 += restore_loss.cpu().data.numpy() * batch_size
         else:
-            mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(p3d_h36[:, in_n:] - p3d_out, dim=3), dim=2), dim=0)
-            m_p3d_h36 += mpjpe_p3d_h36.cpu().data.numpy()
+            m_p3d_h36 += restore_loss.cpu().data.numpy() * batch_size
 
         if i % 1000 == 0:
             print('{}/{}|bt {:.3f}s|tt{:.0f}s'.format(i + 1, len(data_loader), time.time() - bt, time.time() - st))
 
     ret = {}
     if is_train == 0:
-        ret["l_p3d"] = l_p3d / n
+        ret["m_p3d_h36"] = l_retore / n
 
     if is_train <= 1:
         ret["m_p3d_h36"] = m_p3d_h36 / n
 
     else:
-        m_p3d_h36 = m_p3d_h36 / n
-        for j in range(out_n):
-            ret["#{:d}".format(titles[j])] = m_p3d_h36[j]
+        ret["m_p3d_h36"] = m_p3d_h36 / n
 
     return ret
 

@@ -630,6 +630,12 @@ def smooth_euler(angle):
 
     return euler_smooth
 
+def remove_singlular_batch(pred_q):
+    pred_q_updated = pred_q.clone()
+    pred_q_updated[:, :, 3:] = torch.remainder(pred_q_updated[:, :, 3:], 2*np.pi)
+    pred_q_updated[:, :, 3:][pred_q_updated[:, :, 3:]>np.pi] = pred_q_updated[:, :, 3:][pred_q_updated[:, :, 3:]>np.pi] - 2*np.pi
+    return pred_q_updated
+
 def expmap2xyz_clear(expmap,parent, offset):
     """
     convert expmaps to joint locations

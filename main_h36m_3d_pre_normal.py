@@ -1,7 +1,7 @@
 import pickle
 
 import visual
-from utils import h36motion as datasets, data_utils
+from utils import h36motion3d as datasets, data_utils
 from model import AttModel, Restoration
 from utils.opt import Options
 from utils import util
@@ -17,7 +17,7 @@ import torch.optim as optim
 import os
 
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 smooth_sigma = 6
 smooth_sigma_va = 8
 
@@ -95,26 +95,26 @@ def main(opt):
         #            "greeting", "phoning", "posing", "purchases", "sitting",
         #            "sittingdown", "takingphoto", "waiting", "walkingdog",
         #            "walkingtogether"]
-        dataset = load_dataset('train.pkl')
+        dataset = load_dataset('train_3d.pkl')
         if dataset is None:
             dataset = datasets.Datasets(opt, split=0)
-            save_dataset(dataset, 'train.pkl')
+            save_dataset(dataset, 'train_3d.pkl')
         print('>>> Training dataset length: {:d}'.format(dataset.__len__()))
         data_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=True, num_workers=0, pin_memory=True)
 
-        valid_dataset = load_dataset('valid.pkl')
+        valid_dataset = load_dataset('valid_3d.pkl')
         if valid_dataset is None:
             valid_dataset = datasets.Datasets(opt, split=1)
-            save_dataset(valid_dataset, 'valid.pkl')
+            save_dataset(valid_dataset, 'valid_3d.pkl')
 
         print('>>> Validation dataset length: {:d}'.format(valid_dataset.__len__()))
         valid_loader = DataLoader(valid_dataset, batch_size=opt.test_batch_size, shuffle=True, num_workers=0,
                                   pin_memory=True)
 
-    test_dataset = load_dataset('test.pkl')
+    test_dataset = load_dataset('test_3d.pkl')
     if test_dataset is None:
         test_dataset = datasets.Datasets(opt, split=2)
-        save_dataset(test_dataset, 'test.pkl')
+        save_dataset(test_dataset, 'test_3d.pkl')
     print('>>> Testing dataset length: {:d}'.format(test_dataset.__len__()))
     test_loader = DataLoader(test_dataset, batch_size=opt.test_batch_size, shuffle=False, num_workers=0,
                              pin_memory=True)
@@ -186,16 +186,15 @@ def run_model(net_pred, net_restore,optimizer=None, is_train=0, data_loader=None
     itera = 1
     st = time.time()
 
-    dim_used_p3d = np.array([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25,
+    dim_used = np.array([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25,
                          26, 27, 28, 29, 30, 31, 32, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
                          46, 47, 51, 52, 53, 54, 55, 56, 57, 58, 59, 63, 64, 65, 66, 67, 68,
-                         75, 76, 77, 78, 79, 80, 81, 82, 83, 87, 88, 89, 90, 91, 92])   #66
+                         75, 76, 77, 78, 79, 80, 81, 82, 83, 87, 88, 89, 90, 91, 92])
 
-    dim_used_angle=np.array([6,  7,   8, 9,  10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 23,
-                         24, 25, 26, 27, 28, 29, 30, 31, 32, 36, 37, 38, 39, 40, 41,
-                         42, 43, 44, 45, 46, 47, 51, 52, 53, 54, 55, 56, 57, 58, 59,
-                         60, 61, 62, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86])-3  # 60
-
+    joint_to_ignore = np.array([16, 20, 23, 24, 28, 31])
+    index_to_ignore = np.concatenate((joint_to_ignore * 3, joint_to_ignore * 3 + 1, joint_to_ignore * 3 + 2))
+    joint_equal = np.array([13, 19, 22, 13, 27, 30])
+    index_to_equal = np.concatenate((joint_equal * 3, joint_equal * 3 + 1, joint_equal * 3 + 2))
 
     for i, (p3d_h36) in enumerate(data_loader):
         # print(i)
@@ -206,69 +205,64 @@ def run_model(net_pred, net_restore,optimizer=None, is_train=0, data_loader=None
         n += batch_size
         bt = time.time()
 
-        euler_smooth = p3d_h36.float().cuda()
+        p3d_h36 = p3d_h36.float().cuda()
 
-        # euler_smooth = data_utils.remove_singlular_batch(euler_smooth)
-        euler_smooth = euler_smooth.view(-1,96)
+        # 模型的输入 shape为(32, 60, 66)
+        p3d_src = p3d_h36.clone()[:, :, dim_used]
 
-        with torch.no_grad():
-            eulerToRot = util.eulerToRot(euler_smooth)
-            gt_pose = data_utils.rot2xyz_torch(eulerToRot)
-            gt_pose = gt_pose.view(batch_size, in_n + out_n, 32, 3)
+        # 输出shape为(32, 20, 1, 66)
 
-        euler_smooth = euler_smooth.view(batch_size, in_n + out_n, 96)
+        p3d_out_all = net_pred(p3d_src)
 
-        p3d_src = euler_smooth.clone()[:, :, dim_used_p3d]
-        p3d_out_all = net_pred(p3d_src, input_n=in_n, output_n=out_n)
-        p3d_out_all = p3d_out_all[:,:,0]
+        # 损失函数的GT值，shape为(32,20,22,3)
+        p3d_sup = p3d_h36.clone()[:, :, dim_used][:, -out_n - seq_in:].reshape(
+            [-1, seq_in + out_n, len(dim_used) // 3, 3])
 
-        p3d_out = euler_smooth.clone()
-        p3d_out[:, :, dim_used_p3d] = p3d_out_all
+        # MPJPE的预测值 shape为(32, 10, 32, 3)
+        p3d_out = p3d_h36.clone()[:, in_n:in_n + out_n]
+        p3d_out[:, :, dim_used] = p3d_out_all[:, seq_in:, 0]
+        p3d_out[:, :, index_to_ignore] = p3d_out[:, :, index_to_equal]
+        p3d_out = p3d_out.reshape([-1, out_n, 32, 3])  # shape(32,10,32,3)
 
-        p3d_out = p3d_out.reshape(-1, 96)
+        # 骨长损失的预测值 shape为(32, 20, 32, 3)
+        # bone_out = p3d_h36.clone()[:, -out_n - seq_in:]
+        # bone_out[:, :, dim_used] = p3d_out_all[:, :, 0]
+        # bone_out[:, :, index_to_ignore] = bone_out[:, :, index_to_equal]
+        # bone_out = bone_out.reshape([-1, out_n+seq_in, 32, 3])  # shape(32,10,32,3)
 
-        with torch.no_grad():
-            eulerToRot = util.eulerToRot(p3d_out)
-            pre_pose = data_utils.rot2xyz_torch(eulerToRot)
-            pre_pose = pre_pose.view(batch_size, in_n + out_n, 32, 3)
+        # MPJPE的GT值 shape为(32, 60, 32, 3)
+        p3d_h36 = p3d_h36.reshape([-1, in_n + out_n, 32, 3])
 
-        if epo ==3 and i == 0 and is_train == 3:
-            with torch.no_grad():
-                visual.visualize(pre_pose[3, in_n:], gt_pose[3, in_n:])
-
-        p3d_sup = euler_smooth.clone()[:, :,dim_used_p3d]
+        # 模型的预测值 shape为(32, 20, 1, 22, 3)
+        p3d_out_all = p3d_out_all.reshape([batch_size, seq_in + out_n, itera, len(dim_used) // 3, 3])
 
         # 2d joint loss:
         grad_norm = 0
         if is_train == 0:
-            # 3d坐标
-            loss_p3d = torch.mean(torch.norm(pre_pose - gt_pose, dim=3))
-
-            # 旋转角
-            # loss_ang = torch.mean(torch.norm(p3d_out_all - p3d_sup, dim=2))
-            loss_ang = torch.mean(torch.sum(torch.abs(p3d_out_all - p3d_sup), dim=2))
-            # loss_all = loss_p3d + restore_loss
-            loss_all = loss_ang + loss_p3d
+            loss_p3d = torch.mean(torch.norm(p3d_out_all[:, :, 0] - p3d_sup, dim=3))
+            l_p3d += loss_p3d.cpu().data.numpy() * batch_size
 
             optimizer.zero_grad()
-            loss_all.backward()
+            loss_p3d.backward()
             nn.utils.clip_grad_norm_(list(net_pred.parameters()), max_norm=opt.max_norm)
             optimizer.step()
             # update log values
 
-        if is_train <= 1:  # if is validation or train simply output the overall mean error
-            mpjpe_p3d_h36 = torch.mean(torch.norm(pre_pose[:,in_n:] - gt_pose[:,in_n:], dim=3))
+        if is_train <= 1:
+            mpjpe_p3d_h36 = torch.mean(torch.norm(p3d_h36[:, in_n:in_n + out_n] - p3d_out, dim=3))
             m_p3d_h36 += mpjpe_p3d_h36.cpu().data.numpy() * batch_size
+        # 在测试模型下，则计算每一帧的mpjpe
         else:
-            mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(pre_pose[:,in_n:] - gt_pose[:,in_n:], dim=3), dim=2), dim=0)
+            mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(p3d_h36[:, in_n:] - p3d_out, dim=3), dim=2), dim=0)
             m_p3d_h36 += mpjpe_p3d_h36.cpu().data.numpy()
+
         if i % 1000 == 0:
             print('{}/{}|bt {:.3f}s|tt{:.0f}s|gn{}'.format(i + 1, len(data_loader), time.time() - bt,
                                                            time.time() - st, grad_norm))
 
     ret = {}
     if is_train == 0:
-        ret["m_p3d_h36"] = m_p3d_h36 / n
+        ret["l_p3d"] = l_p3d / n
     if is_train <= 1:
         ret["m_p3d_h36"] = m_p3d_h36 / n
     else:

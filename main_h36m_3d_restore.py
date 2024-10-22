@@ -13,11 +13,12 @@ import h5py
 import torch.optim as optim
 import os
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 def getMask(bs, input_n, mask_ratio=0.2):
     joint_indices = [2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 17, 18, 19, 21, 22, 25, 26, 27, 29, 30]
-    masked_joints_indices = [18, 19, 21, 22, 2, 3, 4, 5]
+    # masked_joints_indices = [18, 19, 21, 22, 2, 3, 4, 5]
+    masked_joints_indices = [2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 17, 18, 19, 21, 22, 25, 26, 27, 29, 30]
     # 将全局关节编号转换为局部索引
     masked_joint_local_indices = [joint_indices.index(joint) for joint in masked_joints_indices]
 
@@ -43,7 +44,7 @@ def main(opt):
     # opt.is_eval = True
     print('>>> create models')
 
-    net_restore = Restoration.Restoration(input_n=10, d_model=64, num_stage=12,eta=6)
+    net_restore = Restoration.Restoration(input_n=opt.input_n, d_model=64, num_stage=12,eta=6)
 
     net_restore.cuda()
 
@@ -120,7 +121,6 @@ def run_model(net_restore,optimizer=None, is_train=0, data_loader=None, opt=None
     if is_train == 0:
         net_restore.train()
 
-    l_p3d = 0
     l_retore = 0
 
     m_p3d_h36 = 0
@@ -149,8 +149,8 @@ def run_model(net_restore,optimizer=None, is_train=0, data_loader=None, opt=None
         p3d_src = p3d_h36.clone()[:, :, dim_used]
 
         with torch.no_grad():
-            mask = getMask(batch_size, 10, 0.4)
-            src = p3d_src[:,:10].view(batch_size, in_n, 22, 3)
+            mask = getMask(batch_size, in_n, 0.4)
+            src = p3d_src[:,:in_n].view(batch_size, in_n, 22, 3)
             start = src[:, in_n - 1:in_n]
             # x = src * mask[:, :, :, None] + \
             #     (1 - mask[:, :, :, None]) * self.defaultValue(label)
@@ -166,7 +166,7 @@ def run_model(net_restore,optimizer=None, is_train=0, data_loader=None, opt=None
             loss_all = restore_loss
             optimizer.zero_grad()
             loss_all.backward()
-            nn.utils.clip_grad_norm_(list(net_restore.parameters()), max_norm=opt.max_norm)
+            nn.utils.clip_grad_norm_(list(net_restore.parameters()), max_norm=1)
             optimizer.step()
             # update log values
 
